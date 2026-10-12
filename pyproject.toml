@@ -1,0 +1,25 @@
+[project]
+name = "INFO698_LitExplore"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "CesarCastroMunoz", email = "cgcastro@arizona.edu" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "arxiv>=4.0.1",
+    "pyalex>=0.21",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+]
+
+[tool.uv]
+package = false
+
+[project.scripts]
+litexplore = "litexplore:main"
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
