@@ -29,7 +29,7 @@ def read_jsonl(input_file):
             publications.append(json.loads(line.strip()))
     return publications
 
-def ingest_publications(input_file, chunk_size=500):
+def ingest_publications(input_file, chunk_size=250):
     '''Ingest publications from JSONL files and store them in the PostgreSQL vector DB.'''
     conn = psycopg2.connect(neon_connection_string)
     #It registers this custom type so you can pass a standard Python list of 1,536 floats
@@ -59,16 +59,25 @@ def ingest_publications(input_file, chunk_size=500):
         # Skip the rest of the loop if embeddings creation failed
         if 'embeddings' not in locals():
             continue
-
-        
+       
         records_to_insert = []
         for pub, embedded_data in zip(batch, embeddings.data):
             vector = embedded_data.embedding
-            records_to_insert.append((pub["title"], pub["abstract"], pub["authors"], vector))
+            records_to_insert.append((pub["source"], 
+                                      pub["source_id"], 
+                                      pub["publication_date"], 
+                                      pub["doi"], pub["url"], 
+                                      pub["title"], 
+                                      pub["abstract"], 
+                                      pub["authors"], 
+                                      vector))
 
         insert_query = """
-        INSERT INTO publications (title, abstract, authors, embedding)
-        VALUES %s
+            INSERT INTO publications
+                (source, source_id, publication_date, doi, url,
+                title, abstract, authors, embedding)
+            VALUES %s
+            ON CONFLICT DO NOTHING;
         """
 
         try:
@@ -84,7 +93,13 @@ def ingest_publications(input_file, chunk_size=500):
     cursor.close()
     conn.close()
 
+def ingest_files(quantity=20):
+    all_files = list(INPUT_DIR.glob("*.jsonl"))
+    for file in all_files[:quantity]:
+        ingest_publications(file)
+
 
 if __name__ == "__main__":
-    test_file = INPUT_DIR / "batch-0d3fdb3a7a914b9fae40ffbaa97bf546.jsonl"
-    ingest_publications(test_file)
+    print("Starting ingestion process...")
+    ingest_files()
+

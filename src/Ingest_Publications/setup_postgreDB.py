@@ -52,10 +52,17 @@ def create_table():
                 cursor.execute("""
                 CREATE TABLE IF NOT EXISTS publications (
                     id SERIAL PRIMARY KEY,
+                    source TEXT,
+                    source_id TEXT,
+                    publication_date DATE,
+                    doi TEXT,
+                    url TEXT,
                     title TEXT NOT NULL,
                     abstract TEXT,
                     authors TEXT,
-                    embedding VECTOR(1536)
+                    embedding VECTOR(1536),
+                    CONSTRAINT publications_source_unique UNIQUE (source, source_id),
+                    CONSTRAINT publications_doi_unique UNIQUE (doi)
                 )
                 """)
                 print("Table 'publications' ensured.")
