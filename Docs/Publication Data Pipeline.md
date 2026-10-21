@@ -56,6 +56,15 @@ to be copied.
 
 ## Logical Steps
 
+### Graph ingestion
+
+`src/Ingest_Publications/create_graph.py` namespaces paper and provider author
+IDs by source. Authors without IDs use the paper ID and author position.
+Insertion warns and skips edges with missing endpoints, and rejects duplicate
+edge triples within a batch. It writes nodes and valid edges in one transaction
+with guaranteed connection cleanup. Existing graph IDs are not automatically
+migrated.
+
 ### 1. Define the search
 
 The calls under each script's `if __name__ == "__main__":` block define the
