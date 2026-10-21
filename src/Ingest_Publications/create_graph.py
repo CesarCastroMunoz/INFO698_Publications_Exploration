@@ -25,6 +25,8 @@ openai_api_key = os.environ.get("OPENAI_KEY")
 EMBEDDING_MODEL = "text-embedding-3-small"
 GRAPH_EXTRACTION_MODEL = "gpt-5.6-luna"
 
+DIMENSION = 512
+
 # -----------------------------------------------------------
 # 1. Schems for Scrict LLM Output
 # -----------------------------------------------------------
@@ -88,7 +90,7 @@ def process_publication_batch(file_path: str, batch_size: int = 15):
     structured_llm = llm.with_structured_output(
         GraphExctraction, method="function_calling", strict=False
     )
-    embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=openai_api_key)
+    embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=openai_api_key, dimensions=DIMENSION)
 
     with open(file_path, "r", encoding="utf-8") as f:
         lines = [line for line in f if line.strip()]

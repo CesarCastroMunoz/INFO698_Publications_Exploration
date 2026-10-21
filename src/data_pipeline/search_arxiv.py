@@ -149,7 +149,7 @@ if __name__=="__main__":
         'OR all:"large language model" OR all:"large language models")'
     )
 
-    for year in range(2000, 2025):
+    for year in range(2010, 2025):
         arxiv_search_topic(
             f"{health_terms} AND {ai_terms}",
             max_results=1000,

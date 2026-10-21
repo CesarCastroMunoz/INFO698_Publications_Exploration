@@ -125,10 +125,10 @@ if __name__=="__main__":
 
     openalex_search_topic(
         f'{health_terms} AND {method_terms}',
-        from_date="2000-01-01",
+        from_date="2000-01-01",max_results=500000
     )
 
     openalex_search_topic(
         f'{application_terms} AND {method_terms}',
-        from_date="2000-01-01",
+        from_date="2000-01-01",max_results=500000
     )    

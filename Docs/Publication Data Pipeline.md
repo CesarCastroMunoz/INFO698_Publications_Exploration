@@ -63,7 +63,8 @@ IDs by source. Authors without IDs use the paper ID and author position.
 Insertion warns and skips edges with missing endpoints, and rejects duplicate
 edge triples within a batch. It writes nodes and valid edges in one transaction
 with guaranteed connection cleanup. Existing graph IDs are not automatically
-migrated.
+migrated. For the graph schema, extraction flow, embedding strategy, and
+current limitations, see [Knowledge Graph Approach](Knowledge%20Graph%20Approach.md).
 
 ### 1. Define the search
 
@@ -354,3 +355,12 @@ These review steps are recommended downstream work; the search scripts do not
 perform them automatically. Source coverage, missing abstracts, API limits,
 and search wording mean that the collection is not guaranteed to be exhaustive
 or exclusively peer-reviewed.
+
+### Vector database ingestion
+
+`src/Ingest_Publications/ingest_vectorDB.py` stores publication metadata and
+embeddings in the PostgreSQL `publications` table. OpenAlex citation IDs from
+the JSONL `references` field are persisted in the `"references"` `TEXT[]`
+column when creating a fresh table. Existing records are skipped on conflict,
+and JSONL records without `references` store an empty array. Reingesting old
+JSONL files cannot recover reference IDs that were never saved in those files.

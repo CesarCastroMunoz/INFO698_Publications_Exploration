@@ -49,7 +49,7 @@ class Publication:
 
     def __post_init__(self) -> None:
         '''Calls after it creates and initializes a Publication object
-           Cleans Text and formats to be appropiated for markdown and use later'''
+           Cleans Text and formats to be appropiated for storage and Markdown export.'''
         if not self.source_id.strip():
             raise ValueError(f"Missing publication ID from {self.source}")
         self.title = clean_text(self.title) or "Untitled Work"

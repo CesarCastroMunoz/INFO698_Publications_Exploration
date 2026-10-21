@@ -19,6 +19,7 @@ openai_api_key = os.environ.get("OPENAI_KEY")
 INPUT_DIR = Path(__file__).resolve().parent.parent / "publications"
 client = OpenAI(api_key=openai_api_key)
 MODEL = "text-embedding-3-small"
+DIMENSION = 512
 
 def read_jsonl(input_file):
     '''Read publications from a JSONL file and return them as a list of dictionaries.'''
@@ -50,16 +51,13 @@ def ingest_publications(input_file, chunk_size=250):
             texts_to_embed = [f"Title: {pub['title']}. Abstract: {pub['abstract']}" for pub in batch]
             embeddings = client.embeddings.create(
                 model=MODEL,
-                input=texts_to_embed
+                input=texts_to_embed,
+                dimensions=DIMENSION
             )
         except Exception as e:
             print(f"Error creating embeddings for batch starting at index {i}: {e}")
             continue
-
-        # Skip the rest of the loop if embeddings creation failed
-        if 'embeddings' not in locals():
-            continue
-       
+      
         records_to_insert = []
         for pub, embedded_data in zip(batch, embeddings.data):
             vector = embedded_data.embedding
@@ -67,6 +65,7 @@ def ingest_publications(input_file, chunk_size=250):
                                       pub["source_id"], 
                                       pub["publication_date"], 
                                       pub["doi"], pub["url"], 
+                                      pub.get("references", []),
                                       pub["title"], 
                                       pub["abstract"], 
                                       pub["authors"], 
@@ -74,7 +73,7 @@ def ingest_publications(input_file, chunk_size=250):
 
         insert_query = """
             INSERT INTO publications
-                (source, source_id, publication_date, doi, url,
+                (source, source_id, publication_date, doi, url, "references",
                 title, abstract, authors, embedding)
             VALUES %s
             ON CONFLICT DO NOTHING;
@@ -93,7 +92,7 @@ def ingest_publications(input_file, chunk_size=250):
     cursor.close()
     conn.close()
 
-def ingest_files(quantity=20):
+def ingest_files(quantity=200):
     all_files = list(INPUT_DIR.glob("*.jsonl"))
     for file in all_files[:quantity]:
         ingest_publications(file)
@@ -102,4 +101,3 @@ def ingest_files(quantity=20):
 if __name__ == "__main__":
     print("Starting ingestion process...")
     ingest_files()
-

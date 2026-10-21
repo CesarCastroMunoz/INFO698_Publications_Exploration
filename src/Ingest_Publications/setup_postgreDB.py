@@ -46,7 +46,7 @@ def test_connection():
 
 def create_table():
     '''Create the publications table in the PostgreSQL database if it doesn't exist.
-    --text-embedding-3-small-- generates 1536-dimensional vectors'''
+    --text-embedding-3-small-- generates 512-dimensional vectors'''
     conn = psycopg2.connect(connection_string)
     try:
         with conn:
@@ -59,10 +59,11 @@ def create_table():
                     publication_date DATE,
                     doi TEXT,
                     url TEXT,
+                    "references" TEXT[] NOT NULL DEFAULT '{}',
                     title TEXT NOT NULL,
                     abstract TEXT,
                     authors TEXT,
-                    embedding VECTOR(1536),
+                    embedding VECTOR(512),
                     CONSTRAINT publications_source_unique UNIQUE (source, source_id),
                     CONSTRAINT publications_doi_unique UNIQUE (doi)
                 )
@@ -94,7 +95,7 @@ def create_node_table():
                     label TEXT NOT NULL,
                     name TEXT NOT NULL,
                     properties JSONB DEFAULT '{}'::jsonb,
-                    embedding vector(1536) 
+                    embedding vector(512) 
                     );
                 """)
                 print("Table 'nodes' created.")
@@ -144,7 +145,7 @@ def create_flat_index_table():
 if __name__ == "__main__":
     test_connection()
     enable_extensions()
-    #drop_table()  # if we want to recreate the table
+    drop_table("publications")  # if we want to recreate the table
     create_table()
 
     # Drop existing tables to start fresh
