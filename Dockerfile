@@ -1,6 +1,12 @@
 # Use a lightweight Python 3.12.10 base image
 FROM python:3.12.10-slim
 
+# Install system dependencies for PostgreSQL (psycopg2) and C compilers
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv directly from the official image
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
