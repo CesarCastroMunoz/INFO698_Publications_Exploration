@@ -28,6 +28,9 @@ import pyalex
 from pyalex import Works, Work
 pyalex.config.api_key = OPENALEX_API_KEY
 pyalex.config.email = USER_EMAIL
+pyalex.config.max_retries = 5
+pyalex.config.retry_backoff_factor = 2
+pyalex.config.retry_http_codes = [429, 500, 502, 503, 504]
 
 #converts results into a publication Object that will be use to save results
 def to_publication(result: dict) -> Publication:
@@ -51,10 +54,14 @@ def to_publication(result: dict) -> Publication:
         abstract=work["abstract"] if work.get("abstract_inverted_index") else None,
     )
 
-def openalex_search_topic(topic, from_date="2024-01-01", max_results=100000):
-    '''
-    Request to search by topic
-    '''
+def openalex_search_topic(
+    topic, from_date="2024-01-01", max_results=100000, *, cursor: str = "*", start_batch: int = 1
+):
+    """Search from a cursor, fetching at most max_results records in this run."""
+    if not cursor.strip():
+        raise ValueError("cursor must not be empty")
+    if start_batch < 1:
+        raise ValueError("start_batch must be at least 1")
 
     target_dir = OUTPUT_DIR
 
@@ -75,12 +82,16 @@ def openalex_search_topic(topic, from_date="2024-01-01", max_results=100000):
     print(f"Starting batch download for: {topic}")
     total_saved = 0 # Track how many documents process
     writer = PublicationBuffer(target_dir, existing_ids)
+    resume_cursor = cursor
+    next_batch = start_batch
     
     # .paginate() fetches results page-by-page.
     # per_page=200 is the maximum allowed by OpenAlex per API call.
     # n_max safely caps the download.
     try:
-        for page_num, page_results in enumerate(query.paginate(per_page=100, n_max=max_results), start=1):
+        for page_num, page_results in enumerate(
+            query.paginate(per_page=100, n_max=max_results, cursor=cursor), start=start_batch
+        ):
                         
             newly_saved = writer.add(
                 to_publication(result) for result in page_results
@@ -89,10 +100,14 @@ def openalex_search_topic(topic, from_date="2024-01-01", max_results=100000):
             
             print(f"Processed batch {page_num} | New publications accepted: {newly_saved} "
                   f"| Saved: {writer.saved} | Pending: {len(writer.records)}")
+            resume_cursor = page_results.meta["next_cursor"]
+            next_batch = page_num + 1
             
     except RequestException as e:
         print(f"An error occurred during pagination: {e}")
         writer.flush()
+        print(f"Resume this same query with cursor={resume_cursor!r}, start_batch={next_batch}. "
+              "max_results limits records fetched in the resumed run.")
         raise
     writer.flush()
     print(f"Finished! Total new publications saved for '{topic}': {total_saved}\n")
@@ -113,7 +128,7 @@ if __name__=="__main__":
         'OR "deep learning" OR "data science" '
         'OR "predictive analytics" OR "neural networks" '
         'OR "computer vision" OR "natural language processing" '
-        'OR "large language models")'
+        'OR "large language models" OR "Machine Learning")'
     )
 
     application_terms = (
@@ -124,11 +139,13 @@ if __name__=="__main__":
     )
 
     openalex_search_topic(
+        f'{application_terms} AND {method_terms}',
+        from_date="2000-01-01",max_results=500000
+    )   
+    
+    openalex_search_topic(
         f'{health_terms} AND {method_terms}',
         from_date="2000-01-01",max_results=500000
     )
 
-    openalex_search_topic(
-        f'{application_terms} AND {method_terms}',
-        from_date="2000-01-01",max_results=500000
-    )    
+ 
