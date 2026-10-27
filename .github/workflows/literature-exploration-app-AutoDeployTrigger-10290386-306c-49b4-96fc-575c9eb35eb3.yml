@@ -45,6 +45,7 @@ jobs:
           imageToBuild: literatureexplorationacr.azurecr.io/literature-exploration-app:${{ github.sha }}
           dockerfilePath: Dockerfile
           disableTelemetry: true
+          targetPort: 8000
           _buildArgumentsKey_: |
             _buildArgumentsValues_
 
