@@ -1,29 +1,20 @@
-# Use a lightweight Python 3.12.10 base image
+# Match the project's Python runtime using a smaller Debian-based image.
 FROM python:3.12.10-slim
 
-# Install system dependencies for PostgreSQL (psycopg2) and C compilers
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv directly from the official image
+# Copy uv from its official image for dependency installation.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-# Set the working directory
 WORKDIR /app
 
-# Copy the dependency files first (to cache this layer)
+# Cache dependency installation separately from application code changes.
+# This command resolves pyproject.toml dependencies; it does not use uv.lock.
 COPY pyproject.toml uv.lock* ./
-
-# Install ONLY the dependencies, without building the app as a package
 RUN uv pip install --system -r pyproject.toml
 
-# Copy your source code into the container
+# Copy application code only; supply secrets through runtime environment variables.
 COPY src/ /app/src/
 
-# Expose Streamlit's port
+# Document the container port; publish it with docker run -p 8000:8000.
 EXPOSE 8000
 
-# Start the Streamlit application
+# Listen on all container interfaces so the published port is reachable.
 CMD ["python", "-m", "streamlit", "run", "src/stapp/app.py", "--server.port", "8000", "--server.address", "0.0.0.0"]

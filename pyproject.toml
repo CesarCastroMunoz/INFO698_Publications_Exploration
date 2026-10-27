@@ -15,7 +15,6 @@ dependencies = [
     "openai>=3.31.0",
     "pandas>=2.3.3",
     "pgvector>=0.5.1",
-    "psycopg2>=2.9.13",
     "psycopg2-binary>=2.9.13",
     "pyalex>=0.21",
     "python-dotenv>=1.2.4",
