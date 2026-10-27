@@ -43,6 +43,8 @@ jobs:
           containerAppName: literature-exploration-app
           resourceGroup: Literature_Exploration
           imageToBuild: literatureexplorationacr.azurecr.io/literature-exploration-app:${{ github.sha }}
+          dockerfilePath: Dockerfile
+          disableTelemetry: true
           _buildArgumentsKey_: |
             _buildArgumentsValues_
 
