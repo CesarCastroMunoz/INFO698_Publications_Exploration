@@ -43,10 +43,14 @@ def to_publication(result: dict) -> Publication:
         abstract=result.get("abstract"),
     )
 
-def semantic_scholar_search_topic(topic, year_range="2000-", max_results=1000):
-    '''
-    Request to search Semantic Scholar by topic with batch pagination
-    '''
+def semantic_scholar_search_topic(
+    topic, year_range="2000-", max_results=1000, *, start_token: str | None = None, start_batch: int = 1
+):
+    """Search from a bulk pagination token; max_results targets new records in this run."""
+    if start_token is not None and not start_token.strip():
+        raise ValueError("start_token must not be empty")
+    if start_batch < 1:
+        raise ValueError("start_batch must be at least 1")
     target_dir = OUTPUT_DIR
     existing_ids = get_existing_ids(target_dir)
     
@@ -56,10 +60,10 @@ def semantic_scholar_search_topic(topic, year_range="2000-", max_results=1000):
     endpoint = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
     headers = {"x-api-key": S2_API_KEY} if S2_API_KEY else {}
     
-    token = None
+    token = start_token
     total_saved = 0
     writer = PublicationBuffer(target_dir, existing_ids)
-    batch_num = 1
+    batch_num = start_batch
 
     try:
         while total_saved < max_results:
@@ -108,14 +112,24 @@ def semantic_scholar_search_topic(topic, year_range="2000-", max_results=1000):
     except requests.RequestException as e:
         print(f"An error occurred during pagination: {e}")
         writer.flush()
+        print(f"Resume this same query and year_range with start_token={token!r}, "
+              f"start_batch={batch_num}. max_results targets new records in the resumed run.")
         raise
     writer.flush()
     print(f"Finished! Total new publications saved for '{topic}': {total_saved}\n")
 
 if __name__=="__main__":
+    # health_terms = (
+    #     '(healthcare | "health care" | medical '
+    #     '| clinical | biomedical)'
+    # )
+
     health_terms = (
-        '(healthcare | "health care" | medical '
-        '| clinical | biomedical)'
+    '(EHR | EMR '
+    '| telemedicine | telehealth | wearables '
+    '| genomics | bioinformatics | "precision medicine" '
+    '| "personalized medicine" | radiology | pathology '
+    '| oncology | cardiology | epidemiology)'
     )
 
     application_terms = (
@@ -126,12 +140,18 @@ if __name__=="__main__":
 
     ai_terms = (
         '("artificial intelligence" | "machine learning" '
-        '| "deep learning" | "neural network" '
+        '| "deep learning" | "data science" '
+        '| "predictive analytics" | "neural network" '
         '| "neural networks" | "computer vision" '
         '| "large language model" | "large language models")'
     )
 
     semantic_scholar_search_topic(
         f'{health_terms} + {ai_terms}',
-        max_results=100000,
+        max_results=250000,
     )
+
+    # semantic_scholar_search_topic(
+    #     f'{application_terms} + {ai_terms}',
+    #     max_results=250000,
+    # )

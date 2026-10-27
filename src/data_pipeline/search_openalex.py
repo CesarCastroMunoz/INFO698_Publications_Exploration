@@ -116,11 +116,20 @@ if __name__=="__main__":
     #openalex_search_topic('"health care" AND "Artificial Intelligence"')
     #openalex_search_topic('"health care" AND "AI"')
     #openalex_search_topic('"health care" AND "Computer Vision"')
+    
+    # health_terms = (
+    # '(healthcare OR "health care" OR medical OR clinical '
+    # 'OR biomedical OR patient OR hospital '
+    # 'OR "public health" OR "medical imaging" '
+    # 'OR "electronic health records")'
+    # )
+
     health_terms = (
-    '(healthcare OR "health care" OR medical OR clinical '
-    'OR biomedical OR patient OR hospital '
-    'OR "public health" OR "medical imaging" '
-    'OR "electronic health records")'
+    '(EHR OR EMR '
+    'OR telemedicine OR telehealth OR wearables '
+    'OR genomics OR bioinformatics OR "precision medicine" '
+    'OR "personalized medicine" OR radiology OR pathology '
+    'OR oncology OR cardiology OR epidemiology)'
     )
 
     method_terms = (
@@ -128,7 +137,11 @@ if __name__=="__main__":
         'OR "deep learning" OR "data science" '
         'OR "predictive analytics" OR "neural networks" '
         'OR "computer vision" OR "natural language processing" '
-        'OR "large language models" OR "Machine Learning")'
+        'OR "large language models" OR LLM OR "generative AI" '
+        'OR "foundation models" OR transformers '
+        'OR "federated learning" OR "transfer learning" '
+        'OR "reinforcement learning" OR "explainable AI" OR XAI '
+        'OR "graph neural networks" OR "random forest")'
     )
 
     application_terms = (
@@ -138,14 +151,18 @@ if __name__=="__main__":
     'OR "disease prediction")'
     )
 
-    openalex_search_topic(
-        f'{application_terms} AND {method_terms}',
-        from_date="2000-01-01",max_results=500000
-    )   
-    
+
     openalex_search_topic(
         f'{health_terms} AND {method_terms}',
-        from_date="2000-01-01",max_results=500000
+        from_date="2000-01-01",
+        max_results=250000
     )
+
+    # openalex_search_topic(
+    #     f'{application_terms} AND {method_terms}',
+    #     from_date="2000-01-01",max_results=500000
+    # )   
+
+
 
  

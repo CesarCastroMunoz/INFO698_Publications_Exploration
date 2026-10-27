@@ -32,7 +32,7 @@ Publication JSONL
         +-- Build Author nodes and AUTHORED edges from metadata
         |
         +-- If an abstract exists:
-        |       ask the structured-output LLM for up to 5 concepts and edges
+        |       ask the structured-output LLM for up to 7 concepts and edges
         |       embed the extracted concept names in one batch
         |
         +-- Yield one graph per publication
@@ -52,50 +52,60 @@ request.
 
 ### Node labels
 
-The Pydantic schema allows these seven labels:
+The LLM may extract entities with these labels:
 
 | Label | Created by | Meaning |
 |---|---|---|
-| `Publication` | Deterministic code | A source publication. |
-| `Author` | Deterministic code | An author listed in the publication metadata. |
-| `Method` | LLM extraction | An AI or analytical method discussed in the abstract. |
-| `Task` | LLM extraction | A research or clinical task addressed by the work. |
-| `Medical_Condition` | LLM extraction | A disease or condition studied. |
-| `Data_Modality` | LLM extraction | A kind of data used, such as imaging or clinical text. |
-| `Metric` | LLM extraction | A measure used to evaluate the work. |
+| `Method` | LLM extraction | An AI or analytical method. |
+| `Task` | LLM extraction | A research or clinical task. |
+| `Condition` | LLM extraction | A disease or medical condition. |
+| `Data_Modality` | LLM extraction | A type of data, such as imaging or clinical text. |
+| `Metric` | LLM extraction | A measure used for evaluation. |
+| `Model_Architecture` | LLM extraction | A model architecture. |
+| `Dataset` | LLM extraction | A dataset used or discussed. |
+| `Algorithm` | LLM extraction | An algorithm used or discussed. |
+| `Chemical_or_Drug` | LLM extraction | A chemical or drug. |
+| `Institution` | LLM extraction | An institution discussed in the abstract. |
+| `Symptom` | LLM extraction | A symptom studied or discussed. |
 
-The prompt allows the LLM to extract only the five semantic categories; it
-explicitly excludes publications and authors because those are constructed
-from metadata. It also asks for no more than five important semantic entities
-per abstract.
+The prompt excludes publications and authors because they are built from
+metadata. It requests up to seven important, distinct semantic entities,
+standardized lowercase names, and unique snake_case IDs. Extracted facts must
+be supported by the title or abstract, and every entity must have a direct
+edge from its publication.
 
 ### Relationship types
 
-The structured schema restricts edges to these relationship names:
+The structured schema restricts extracted edges to these relationship names:
 
 | Relation | Intended meaning |
 |---|---|
-| `AUTHORED` | Connects an author to a publication. |
 | `USES_METHOD` | Publication uses a method. |
 | `TARGETS_TASK` | Publication addresses a task. |
+| `EVALUATED_ON` | Work is evaluated on data or a dataset. |
+| `TRAINED_WITH` | Model or method is trained with data or a dataset. |
+| `MEASURED_BY` | Work is evaluated using a metric. |
+| `OUTPERFORMS` | One model or method performs better than another. |
 | `STUDIES_CONDITION` | Publication studies a medical condition. |
-| `EVALUATED_ON` | Publication uses or is evaluated on a data modality. |
-| `MEASURED_BY` | Publication is evaluated using a metric. |
+| `HAS_SYMPTOM` | A condition is associated with a symptom. |
+| `TREATS` | A method or intervention treats a condition. |
+| `CAUSES` | One concept causes another. |
+| `INHIBITS` | One concept inhibits another. |
 
-The deterministic author edge is directed **from Author to Publication**:
-`Author -[AUTHORED]-> Publication`. For semantic edges, the prompt asks the
-model to connect extracted entities to the publication using its exact ID.
-The intended pattern is `Publication -[relation]-> concept`; however, the
-current code does not independently enforce the semantic edge direction or a
-one-edge-per-concept shape. The generated graph is constrained by the response
-schema and later checked for valid endpoints before insertion.
+`AUTHORED` edges are created deterministically from author metadata and directed
+from Author to Publication. For semantic edges, the prompt requires the exact
+publication ID as the source of a direct edge to each extracted entity. The
+model may also return other supported entity-to-entity edges. The response
+schema restricts relation names, and the ingestion code later checks edge
+endpoints before insertion.
 
 ### Node and edge shape
 
 Each node has:
 
 - `id`: the graph's identity key.
-- `label`: one of the seven labels above.
+- `label`: one of the semantic labels above, or `Publication` and `Author` for
+  nodes created deterministically from metadata.
 - `name`: the readable node name.
 - `properties`: optional structured metadata, stored as JSONB.
 - `embedding`: a 1,536-dimensional vector when one was generated.
@@ -249,7 +259,7 @@ existing tables and upserts records.
 
 - The graph captures publication metadata and a small set of abstract-level
   concepts; it does not process full-text PDFs.
-- The LLM's five-entity cap favors a concise graph and can omit relevant
+- The LLM's seven-entity cap favors a concise graph and can omit relevant
   details. The output is not independently fact-checked.
 - Semantic IDs are not canonically normalized or namespaced in the extraction
   path. Exact ID reuse merges nodes; synonymous names with different IDs

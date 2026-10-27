@@ -22,11 +22,10 @@ def enable_extensions():
         with conn:
             with conn.cursor() as cursor:
                 cursor.execute("CREATE EXTENSION IF NOT EXISTS vector")
-                cursor.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
-                cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
-                register_vector(cursor)
-                cursor.execute("SELECT '[1,2,3]'::vector::text")
-                print(f"pgvector enabled. Test vector: {cursor.fetchone()[0]}")
+                #fuzzy matching to support similarity searches / typos
+                cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;") 
+                register_vector(cursor)                
+                print(f"pgvector enabled, extensions ensured.")
     finally:
         conn.close()
 
@@ -124,6 +123,8 @@ def create_edge_table():
 
 def create_flat_index_table():
     '''Create the flat index table in the PostgreSQL database if it doesn't exist.
+       Source: https://neon.com/blog/understanding-vector-search-and-hnsw-index-with-pgvector
+       Speeds similarity searches for node embeddings
        Create Graph traversal indexes'''
     conn = psycopg2.connect(connection_string)
     try:
@@ -136,8 +137,8 @@ def create_flat_index_table():
                         WITH (m = 16, ef_construction = 100);
 
                     -- Edge traversal indexes for instant 1-hop and 2-hop routing
-                    CREATE INDEX idx_kg_edges_source_rel ON kg_edges(source, relation);
-                    CREATE INDEX idx_kg_edges_target_rel ON kg_edges(target, relation);
+                    CREATE INDEX IF NOT EXISTS idx_kg_edges_source_rel ON kg_edges(source, relation);
+                    CREATE INDEX IF NOT EXISTS idx_kg_edges_target_rel ON kg_edges(target, relation);
                 """)
     finally:
         conn.close()

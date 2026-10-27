@@ -23,26 +23,33 @@ connection_string = os.environ.get("NEON_DATABASE_URL")
 openai_api_key = os.environ.get("OPENAI_KEY")
 
 EMBEDDING_MODEL = "text-embedding-3-small"
-GRAPH_EXTRACTION_MODEL = "gpt-5.6-luna"
-
+GRAPH_EXTRACTION_MODEL = "gpt-6-luna" 
 DIMENSION = 512
 
+ALLOWED_NODES = [
+    "Method", "Task", "Condition", "Data_Modality", "Metric", 
+    "Model_Architecture", "Dataset", "Algorithm", "Chemical_or_Drug", 
+    "Institution", "Symptom"
+]
+
+ALLOWED_EDGES = [
+    "USES_METHOD", "TARGETS_TASK", "EVALUATED_ON", "TRAINED_WITH", 
+    "MEASURED_BY", "OUTPERFORMS", "STUDIES_CONDITION", "HAS_SYMPTOM", 
+    "TREATS", "CAUSES", "INHIBITS"
+]
+
 # -----------------------------------------------------------
-# 1. Schems for Scrict LLM Output
+# 1. Schemas for Strict LLM Output
 # -----------------------------------------------------------
 
 class Node(BaseModel):
-    id: str = Field(..., description="Unique snake_case identifier")
+    id: str = Field(..., description="Unique identifier for the node")
     
-    # Expanded to 7 labels (2 Deterministic + 5 Semantic)
+    # Expanded to to fix schema for additional entity types
     label: Literal[
-        "Publication", 
-        "Author", 
-        "Method", 
-        "Task", 
-        "Medical_Condition", 
-        "Data_Modality", 
-        "Metric"
+        "Method", "Task", "Condition", "Data_Modality", "Metric", 
+        "Model_Architecture", "Dataset", "Algorithm", "Chemical_or_Drug", 
+        "Institution", "Symptom"
     ] = Field(..., description="The category of the extracted entity.")
     
     name: str = Field(..., description="Standardized, lower-case name of the entity")
@@ -54,17 +61,14 @@ class Edge(BaseModel):
     
     # Fix: Ensure relation types are strictly defined as literals
     relation: Literal[
-        "AUTHORED", 
-        "USES_METHOD", 
-        "TARGETS_TASK", 
-        "STUDIES_CONDITION", 
-        "EVALUATED_ON", 
-        "MEASURED_BY"
+        "USES_METHOD", "TARGETS_TASK", "EVALUATED_ON", "TRAINED_WITH", 
+        "MEASURED_BY", "OUTPERFORMS", "STUDIES_CONDITION", "HAS_SYMPTOM", 
+        "TREATS", "CAUSES", "INHIBITS"
     ] = Field(..., description="The predicate connecting the source to the target.")
     
     properties: dict = Field(default_factory=dict, description="Additional properties")
 
-class GraphExctraction(BaseModel):
+class GraphExtraction(BaseModel):
     nodes: list[Node] = Field(..., description="List of nodes in the graph")
     edges: list[Edge] = Field(..., description="List of edges in the graph")
 
@@ -88,7 +92,7 @@ def process_publication_batch(file_path: str, batch_size: int = 15):
         use_responses_api=True,
     )
     structured_llm = llm.with_structured_output(
-        GraphExctraction, method="function_calling", strict=False
+        GraphExtraction, method="function_calling", strict=False
     )
     embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=openai_api_key, dimensions=DIMENSION)
 
@@ -109,7 +113,8 @@ def process_publication_batch(file_path: str, batch_size: int = 15):
         for pub in publications:
             source = pub["source"]
             paper_id = f"paper:{quote(source, safe='')}:{quote(pub['source_id'], safe='')}"
-            
+
+            # Initialize nodes and edges for this publication
             pub_nodes = {
                 paper_id: {
                     "id": paper_id,
@@ -119,7 +124,8 @@ def process_publication_batch(file_path: str, batch_size: int = 15):
                 }
             }
             pub_edges = []
-            
+
+            # Add Authors as nodes and edges
             authors = pub.get("authors", [])
             author_ids = pub.get("author_ids") or [None] * len(authors)
             
@@ -136,16 +142,29 @@ def process_publication_batch(file_path: str, batch_size: int = 15):
                     "source": author_id, "target": paper_id, "relation": "AUTHORED"
                 })
 
+            # Add References as nodes and edges
+            references = pub.get("references", [])
+            for ref_index, ref in enumerate(references):
+                ref_id = f"{paper_id}:reference:{ref_index}"
+                pub_nodes[ref_id] = {
+                    "id": ref_id, "label": "Reference", "name": ref
+                }
+                pub_edges.append({
+                    "source": paper_id, "target": ref_id, "relation": "CITES"
+                })
+
             abstract_text = pub.get("abstract", "")
             if abstract_text:
                 prompt = (
-                    f"Analyze this medical AI abstract and extract a structured knowledge graph.\n"
-                    f"RULES:\n"
-                    f"1. You may ONLY extract entities that fit into these 5 categories: "
-                    f"Method, Task, Medical_Condition, Data_Modality, Metric.\n"
-                    f"2. DO NOT extract Authors or the Publication itself.\n"
-                    f"3. Extract a MAXIMUM of 5 highly important entities total.\n"
-                    f"4. Always link the extracted entities back to the main paper using the exact ID '{paper_id}'.\n\n"
+                    f"Extract a knowledge graph from this medical-AI publication. Use only facts supported by its title or abstract.\n"
+                    f"Extract up to 7 distinct, important entities. Labels must be: {', '.join(ALLOWED_NODES)}. "
+                    f"Relations must be: {', '.join(ALLOWED_EDGES)}. Do not extract authors or the publication; "
+                    f"they are supplied separately. Use concise, standardized lowercase names and unique snake_case IDs.\n"
+                    f"Every extracted entity must have a direct edge from the publication ID '{paper_id}', using the "
+                    f"most appropriate allowed relation. Add other supported edges between extracted entities when useful; "
+                    f"do not invent facts or relations.\n"
+                    f"Return only schema-conforming JSON with nodes (id, label, name, properties) and edges "
+                    f"(source, target, relation, properties); use empty properties when none apply. No markdown or prose.\n\n"
                     f"Title: {pub['title']}\n"
                     f"Abstract: {abstract_text}"
                 )
@@ -275,7 +294,7 @@ def ingest_files(quantity=20):
         conn.close()
 
 if __name__ == "__main__":
-    target_file = INPUT_DIR / "batch-91539ee2bbe64518b0b919778476292c.jsonl"
+    target_file = INPUT_DIR / "batch-1e65e590709742f3b40ba6684a695392.jsonl"
     conn = psycopg2.connect(connection_string)
     
     try:

@@ -255,9 +255,36 @@ and line number.
 
 ### 7. Report progress and handle errors
 
-- **OpenAlex** reports newly saved publications per page. API/network errors are
-  printed and re-raised; data and local file errors propagate directly.
-  A failed run does not print `Finished`.
+- **OpenAlex** reports newly saved publications per page. PyAlex retries the same
+  request up to five times for HTTP 429, 500, 502, 503, and 504, as well as
+  retryable connection/read failures. Retries use exponential backoff (an
+  immediate first retry, then 4, 8, 16, and 32 seconds), honoring `Retry-After`
+  when provided. A recovered request continues at the same pagination cursor
+  without restarting or skipping a page. If retries are exhausted or another
+  API/network error occurs, pending records are flushed, the error is printed
+  and re-raised, and the run does not print `Finished`. Data and local file
+  errors propagate directly.
+  To resume a failed page, pass its printed `cursor` and `start_batch` to
+  `openalex_search_topic()` with the same topic, date filter, and sort order.
+  The cursor controls the position; `start_batch` only controls progress
+  numbering. `max_results` is the number of records to fetch in the resumed
+  run, not the original overall limit. For example:
+
+  ```python
+  openalex_search_topic(
+      topic,
+      from_date="2000-01-01",
+      max_results=197800,
+      cursor="<cursor from the failed request>",
+      start_batch=3023,
+  )
+  ```
+
+  This example assumes batches 1 through 3022 completed at 100 records each
+  and the original target was 500,000 records. Previously saved IDs are
+  still deduplicated. A batch number alone cannot reconstruct a cursor,
+  and a cursor must not be reused for a different query. Resume cursors are
+  printed on handled request failures, not automatically checkpointed to disk.
 - **arXiv** reports retrieved records, existing records skipped, and new publications.
   On a handled API/network error, it stops the current topic without retries,
   reports an incomplete search and a resume offset, and returns `False`. A later
@@ -268,7 +295,26 @@ and line number.
   before every request, with or without an API key, including retries and new
   topic calls. Do not run concurrent searches or other clients using the same
   key without coordinating their requests across endpoints. Request errors
-  are printed and re-raised; data and local file errors propagate directly.
+  flush pending records, print the failed page's `start_token` and `start_batch`,
+  and are re-raised; data and local file errors propagate directly. Resume with
+  the same topic and year range:
+
+  ```python
+  semantic_scholar_search_topic(
+      topic,
+      year_range="2000-",
+      max_results=50000,
+      start_token="<token printed after failure>",
+      start_batch=123,
+  )
+  ```
+
+  The bulk API token determines the position; `start_batch` only labels
+  progress. A batch number alone cannot reconstruct the token. `None` starts
+  from the beginning. Saved IDs are deduplicated, and `max_results` targets
+  newly accepted records in the resumed run (not an overall cross-run limit).
+  Tokens are printed on handled request failures, not checkpointed to disk;
+  this does not provide automatic recovery from a forced termination.
 
 Saved files remain available after a later request fails. Check error messages
 as well as final summaries; a result limit can end a search before all matches
@@ -299,9 +345,9 @@ main-block calls or call their search functions from Python:
 
 | Function | Defaults |
 |---|---|
-| `openalex_search_topic(topic, from_date, max_results)` | Date: `2024-01-01`; retrieved limit: 100,000 |
+| `openalex_search_topic(topic, from_date, max_results, cursor=..., start_batch=...)` | Date: `2024-01-01`; retrieved limit per run: 100,000; cursor: `*`; batch numbering: 1 |
 | `arxiv_search_topic(topic, max_results, start_offset=..., from_date=..., to_date=...)` | Overall limit: 1,000; starting offset: 0; dates: unrestricted |
-| `semantic_scholar_search_topic(topic, year_range, max_results)` | Years: `2024-`; new-record target: 1,000 |
+| `semantic_scholar_search_topic(topic, year_range, max_results, start_token=..., start_batch=...)` | Years: `2000-`; new-record target per run: 1,000; token: `None`; batch numbering: 1 |
 
 The main-block calls can override these defaults. In the current scripts,
 OpenAlex searches from 2010, arXiv requests up to 100,000 records per topic, and
@@ -364,3 +410,35 @@ the JSONL `references` field are persisted in the `"references"` `TEXT[]`
 column when creating a fresh table. Existing records are skipped on conflict,
 and JSONL records without `references` store an empty array. Reingesting old
 JSONL files cannot recover reference IDs that were never saved in those files.
+
+Before calling the embedding API, ingestion queries PostgreSQL for each batch's
+`(source, source_id)` identities and non-null DOIs. It skips existing rows and
+duplicates within the batch, including DOI conflicts because the table also
+has a unique DOI constraint. These checks use the table's unique indexes
+instead of loading a million database IDs into memory. One input file is loaded
+at a time and processed in batches of 100 records.
+
+Each inserted batch commits independently. Restart the same ingestion command
+after a failure: input files are scanned again, but committed records are
+filtered out **before** embedding. Existing rows are treated as complete and
+are not updated or re-embedded, even if their embedding is null. Batch-level API,
+database, and record-validation errors roll back the batch, print the input file,
+zero-based batch index, and error, then continue with the next batch. A warning
+summarizes failed batches per file. File-reading and initial connection errors
+still stop the run; connections close on exit. An oversized document causes its
+whole batch to be skipped, not truncated. Rerunning retries unsaved batches, so
+oversized inputs must be corrected to ingest them successfully.
+There is no local embedding cache: a failure after
+the API responds but before a database commit may require paying again for
+the last uncommitted batch.
+
+`ingest_files()` processes **all** JSONL files in sorted order by default
+(previously limited to 200). Pass `quantity=200` to explicitly limit the run.
+Run only one ingestion process at a time: concurrent writers can race between
+the check and insert and pay for duplicate embeddings. The database constraints
+remain the final duplicate guard. No paid calls are made for an entirely skipped batch.
+
+Do not run `setup_postgreDB.py` to resume ingestion: its main block **drops the
+publication and graph tables**. Use the existing database and rerun only
+`src/Ingest_Publications/ingest_vectorDB.py`. The existing table must already
+have the documented columns, vector dimension, and unique constraints.
