@@ -9,8 +9,19 @@ wheels/
 # Virtual environments
 .venv
 
+# Downloaded model weights and caches
+.cache/huggingface/
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.ckpt
+pytorch_model*.bin
+
 # Data
 src/publications
+src/graph_extracted
+src/graph_output
 src/temp
 
 #Secrets

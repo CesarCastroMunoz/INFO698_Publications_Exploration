@@ -1,282 +1,176 @@
 # Knowledge Graph Approach
 
-This guide describes the knowledge graph currently implemented by
-[`create_graph.py`](../src/Ingest_Publications/create_graph.py), including how
-publication records become graph data, how that data is stored, and what the
-current design does and does not guarantee.
+## One extractor, one embedding and loading stage
 
-## Purpose
+For the separate CPU-only GLiNER alternative, see the
+[GLiNER quick start](GLiNER%20Quick%20Start.md). It does not replace the original
+OpenAI/LM Studio extractor described below. Both use the shared loader.
 
-The graph organizes publications about medical AI around two kinds of
-information:
+Select the model in `graph_extraction.py`. Extraction writes the same JSONL
+format for either provider and performs no embeddings or database operations.
 
-1. **Bibliographic structure**, created directly from publication metadata:
-   each publication is represented as a node, and its listed authors are
-   connected to it.
-2. **Research concepts**, extracted from each abstract: methods, tasks, medical
-   conditions, data modalities, and evaluation metrics are represented as
-   typed nodes connected to the publication.
-
-Each graph node can also carry a vector embedding. This combines explicit,
-traversable relationships with semantic similarity search over node names.
-The graph is stored in PostgreSQL, with `pgvector` providing vector storage and
-similarity indexing.
-
-## End-to-end flow
-
-```text
-Publication JSONL
-        |
-        +-- Build a Publication node from source + source_id
-        |
-        +-- Build Author nodes and AUTHORED edges from metadata
-        |
-        +-- If an abstract exists:
-        |       ask the structured-output LLM for up to 7 concepts and edges
-        |       embed the extracted concept names in one batch
-        |
-        +-- Yield one graph per publication
-                |
-                +-- Validate edge endpoints and remove duplicate edge triples
-                +-- Upsert nodes and edges into PostgreSQL
-```
-
-The input files are JSON Lines in `src/publications`. Each non-empty line is
-parsed as one publication. The processing function reads the file's lines into
-memory, then works through them in chunks (15 records by default). Publications
-with abstracts in a chunk are sent together to the structured-output model;
-their extracted semantic node names are then embedded in a bulk embedding
-request.
-
-## Graph model
-
-### Node labels
-
-The LLM may extract entities with these labels:
-
-| Label | Created by | Meaning |
+| Script | Purpose | Default output |
 |---|---|---|
-| `Method` | LLM extraction | An AI or analytical method. |
-| `Task` | LLM extraction | A research or clinical task. |
-| `Condition` | LLM extraction | A disease or medical condition. |
-| `Data_Modality` | LLM extraction | A type of data, such as imaging or clinical text. |
-| `Metric` | LLM extraction | A measure used for evaluation. |
-| `Model_Architecture` | LLM extraction | A model architecture. |
-| `Dataset` | LLM extraction | A dataset used or discussed. |
-| `Algorithm` | LLM extraction | An algorithm used or discussed. |
-| `Chemical_or_Drug` | LLM extraction | A chemical or drug. |
-| `Institution` | LLM extraction | An institution discussed in the abstract. |
-| `Symptom` | LLM extraction | A symptom studied or discussed. |
+| [graph_extraction.py](../src/Ingest_Publications/graph_extraction.py), local model selected | Extract with LM Studio `google/gemma-4-12b-qat` | `src/graph_extracted` |
+| Same script, OpenAI model selected | Extract with OpenAI `gpt-6-luna` | `src/graph_extracted` |
+| [embed_load_graphs.py](../src/Ingest_Publications/embed_load_graphs.py) | Embed and load `src/graph_extracted` | Existing PostgreSQL graph tables |
 
-The prompt excludes publications and authors because they are built from
-metadata. It requests up to seven important, distinct semantic entities,
-standardized lowercase names, and unique snake_case IDs. Extracted facts must
-be supported by the title or abstract, and every entity must have a direct
-edge from its publication.
-
-### Relationship types
-
-The structured schema restricts extracted edges to these relationship names:
-
-| Relation | Intended meaning |
-|---|---|
-| `USES_METHOD` | Publication uses a method. |
-| `TARGETS_TASK` | Publication addresses a task. |
-| `EVALUATED_ON` | Work is evaluated on data or a dataset. |
-| `TRAINED_WITH` | Model or method is trained with data or a dataset. |
-| `MEASURED_BY` | Work is evaluated using a metric. |
-| `OUTPERFORMS` | One model or method performs better than another. |
-| `STUDIES_CONDITION` | Publication studies a medical condition. |
-| `HAS_SYMPTOM` | A condition is associated with a symptom. |
-| `TREATS` | A method or intervention treats a condition. |
-| `CAUSES` | One concept causes another. |
-| `INHIBITS` | One concept inhibits another. |
-
-`AUTHORED` edges are created deterministically from author metadata and directed
-from Author to Publication. For semantic edges, the prompt requires the exact
-publication ID as the source of a direct edge to each extracted entity. The
-model may also return other supported entity-to-entity edges. The response
-schema restricts relation names, and the ingestion code later checks edge
-endpoints before insertion.
-
-### Node and edge shape
-
-Each node has:
-
-- `id`: the graph's identity key.
-- `label`: one of the semantic labels above, or `Publication` and `Author` for
-  nodes created deterministically from metadata.
-- `name`: the readable node name.
-- `properties`: optional structured metadata, stored as JSONB.
-- `embedding`: a 1,536-dimensional vector when one was generated.
-
-Each edge has `source`, `target`, `relation`, and optional JSONB `properties`.
-The edge table assigns its own database serial ID; graph identity for an edge
-is the triple `(source, target, relation)`.
-
-## Identity and deduplication
-
-Publication IDs are deterministic and source-scoped:
+The extraction script contains the schema, prompt, metadata construction,
+streaming input, and JSONL writer. No separate launcher scripts or additional
+dependencies are needed.
 
 ```text
-paper:{URL-quoted source}:{URL-quoted source_id}
+Publication JSONL -> Local OR OpenAI extraction -> Graph JSONL
+                                                      |
+                                            embed_load_graphs.py
+                                                      |
+                                   Ready JSONL in src/graph_output
+                                                      |
+                                              PostgreSQL/pgvector
 ```
 
-This prevents two providers' records with the same provider ID from
-accidentally becoming the same publication node. The node's properties also
-retain the raw `source` and `source_id`.
+## Running
 
-Author IDs use provider IDs when available:
-
-```text
-author:provider:{URL-quoted source}:{URL-quoted provider author ID}
-```
-
-Including the source prevents provider-specific author IDs from colliding.
-When an author ID is missing, the fallback is based on the containing
-publication and the author's position in its metadata:
-
-```text
-{publication ID}:author:{zero-based author position}
-```
-
-That fallback is intentionally publication-specific: it preserves the
-author-to-paper record but does not deduplicate the same person across papers.
-
-Semantic node IDs are supplied by the LLM under a schema description asking
-for unique snake-case identifiers. The extraction code does not add a
-publication or provider namespace to these IDs. Consequently, semantic nodes
-with the same exact ID from different publications can merge in PostgreSQL.
-The `slugify()` helper exists in the module, but the current extraction path
-does not call it to normalize or validate LLM-generated IDs.
-
-At insertion time, repeated edge triples within one graph are removed, and the
-database also enforces uniqueness for `(source, target, relation)`. Edges whose
-source or target is absent from the current publication graph are warned about
-and skipped.
-
-## Extraction and embeddings
-
-For a publication with an abstract, the script submits the title and abstract
-to the configured chat model using a Pydantic structured-output schema. The
-request asks for a compact graph of important medical-AI concepts rather than
-an exhaustive information extraction of every phrase. Structured output
-limits labels and relation names, but does not itself guarantee that every
-extracted fact is correct; extracted nodes and edges should be treated as
-machine-generated interpretations of the abstract.
-
-The embedding model is `text-embedding-3-small`. The script embeds the
-**names of newly extracted semantic nodes** together in one request per input
-chunk. It does not embed publication titles, abstracts, or author names in
-this graph-building path. Publications and authors therefore have no vector
-unless a vector is supplied by another process or already exists in the
-database.
-
-If a publication has no abstract, the script yields its deterministic
-publication and author graph immediately, without an LLM extraction or
-semantic-node embeddings.
-
-## PostgreSQL storage
-
-[`setup_postgreDB.py`](../src/Ingest_Publications/setup_postgreDB.py) creates
-the graph tables:
-
-### `kg_nodes`
-
-| Column | Role |
-|---|---|
-| `id TEXT PRIMARY KEY` | Stable graph node ID. |
-| `label TEXT NOT NULL` | Node category. |
-| `name TEXT NOT NULL` | Human-readable node name. |
-| `properties JSONB` | Additional metadata, defaulting to an empty object. |
-| `embedding VECTOR(1536)` | Optional vector from the embedding model. |
-
-### `kg_edges`
-
-| Column | Role |
-|---|---|
-| `id SERIAL PRIMARY KEY` | Database-generated edge row ID. |
-| `source TEXT` | Foreign key to `kg_nodes.id`. |
-| `target TEXT` | Foreign key to `kg_nodes.id`. |
-| `relation TEXT NOT NULL` | Edge predicate. |
-| `properties JSONB` | Additional edge metadata, defaulting to an empty object. |
-
-The edge table cascades deletes from either endpoint and has a unique
-constraint on `(source, target, relation)`. The setup script creates an HNSW
-index using inner-product vector operations for node-vector lookup, plus
-indexes on `(source, relation)` and `(target, relation)` to support directional
-relationship traversal.
-
-`create_graph.py` loads `prod.env` relative to the repository root and reads
-`NEON_DATABASE_URL` and `OPENAI_KEY`. Keep both values private and configure
-them in the environment rather than committing credentials.
-
-## Upsert behavior
-
-`insert_graph_data()` inserts nodes and edges in bulk and commits once per
-publication graph. When a node ID already exists:
-
-- Its `properties` JSONB is merged with the incoming properties, with incoming
-  keys taking precedence.
-- Its embedding is replaced only when the incoming graph has a non-null
-  embedding; otherwise the existing embedding is retained.
-- Its `label` and `name` are **not** updated by the conflict clause.
-
-When an edge triple already exists, its properties are merged, again with
-incoming keys taking precedence. The graph insertion function warns and skips
-edges with missing endpoints, then commits node and valid-edge changes in the
-same connection transaction.
-
-This is an idempotent-style upsert for stable IDs, but it is not a refresh of
-all data. In particular, changed publication titles or author names do not
-automatically replace an existing node's `name`; semantic ID collisions can
-also cause separate concepts to share a database node.
-
-## Running and selecting input
-
-Run from the repository root with the project's environment and dependencies
-available:
+Change only `USE_LOCAL` near the top of the extraction script:
+`True` selects local Gemma 4; `False` selects OpenAI.
+The model and endpoint are selected automatically.
+Both models write unembedded graphs to the single `src/graph_extracted` folder.
+The existing `src/graph_output` folder is reserved for previously embedded graph
+archives and new ready-to-load graphs. Extraction never writes there.
+The loader saves each newly prepared group there before database insertion.
+Then run the extractor and loader using the project environment:
 
 ```powershell
-uv run python .\src\Ingest_Publications\create_graph.py
+python src\Ingest_Publications\graph_extraction.py
+python src\Ingest_Publications\embed_load_graphs.py
 ```
 
-The current `__main__` block processes one hard-coded JSONL file:
-`src/publications/batch-91539ee2bbe64518b0b919778476292c.jsonl`. It does not
-call `ingest_files()`. The `ingest_files(quantity=20)` helper is available for
-processing the first `quantity` paths returned by a directory glob, but that
-selection is not explicitly sorted. To process another file or a controlled
-set of files, update the target-selection code or call
-`process_publication_batch()` for the chosen paths from a script.
+There are no CLI arguments. Edit the calls at the bottom of the scripts:
 
-The graph schema setup script's `__main__` block drops `kg_edges` and
-`kg_nodes` before recreating them. **Running it against a populated database
-deletes the existing graph data.** Use it only when initializing or
-intentionally rebuilding those tables; normal graph ingestion uses the
-existing tables and upserts records.
+- Extraction processes one publication at a time, saving it before moving on.
+- Loader: `run(batch_size=100)`. To read only one directory, pass
+  `input_dir=Path(...)` directly to this call instead.
 
-## Scope and limitations
+The extractor streams **all** sorted JSONL input files in `src/publications`.
+Start LM Studio's server and load the model before local extraction.
+The local endpoint is `http://127.0.0.1:1234/v1`. It uses Chat Completions,
+JSON-schema output, temperature 0, and `reasoning_effort="none"` to disable thinking.
+Its output budget is 4,096 tokens; truncated responses are rejected.
+OpenAI uses the Responses API with the same entity schema.
+These are individual OpenAI requests, **not** the discounted Batch API.
 
-- The graph captures publication metadata and a small set of abstract-level
-  concepts; it does not process full-text PDFs.
-- The LLM's seven-entity cap favors a concise graph and can omit relevant
-  details. The output is not independently fact-checked.
-- Semantic IDs are not canonically normalized or namespaced in the extraction
-  path. Exact ID reuse merges nodes; synonymous names with different IDs
-  remain separate.
-- Provider author IDs are source-scoped, and missing author IDs fall back to
-  per-publication IDs; neither strategy performs person-level identity
-  resolution.
-- The graph ingestion path does not use the publication `references` field to
-  create citation edges.
-- This code creates embeddings for semantic-node names only. It does not
-  currently provide an embedding for full publication text in the graph.
-- The input file's non-empty lines are loaded into memory before chunking, so
-  chunked LLM and embedding calls do not make file reading fully streaming.
-- The default executable processes a single fixed batch file, rather than all
-  files in the publications directory.
+`OPENAI_KEY` is needed for cloud extraction and embedding; `NEON_DATABASE_URL`
+is needed only by the loader. Variables can come from the environment or root
+`prod.env`. No secrets belong in source control.
 
-These boundaries are important when interpreting graph searches: a missing
-node or edge can mean that the concept was not present in the abstract, was
-omitted by the extraction limit, was not extracted by the model, or was not
-included in the selected input file.
+## Extraction and file format
+
+The model extracts at most seven important entities supported by the title or
+abstract. Allowed labels:
+
+`Method`, `Task`, `Condition`, `Data_Modality`, `Metric`,
+`Model_Architecture`, `Dataset`, `Algorithm`, `Chemical_or_Drug`,
+`Institution`, `Symptom`.
+
+Each extracted entity supplies a snake_case ID, standardized lowercase name,
+properties object, and `publication_relation`. IDs use lowercase letters, digits,
+and underscores and may start with a digit (for example, `3d_u_net`).
+Allowed relations:
+
+`USES_METHOD`, `TARGETS_TASK`, `EVALUATED_ON`, `TRAINED_WITH`, `MEASURED_BY`,
+`OUTPERFORMS`, `STUDIES_CONDITION`, `HAS_SYMPTOM`, `TREATS`, `CAUSES`, `INHIBITS`.
+
+Python removes `publication_relation` from the saved node and builds its direct
+Publication-to-entity edge. It also builds Author-to-Publication `AUTHORED` links
+and Publication-to-Reference `CITES` links from metadata. There are **no
+entity-to-entity edges**. Every edge identifies its supporting paper through an
+endpoint; no provenance table is required. Relations remain compatible with
+existing graph queries, but detailed entity-to-entity claims are not represented.
+
+One graph is saved per line:
+
+```json
+{"paper_id":"paper:source:123","source":"source","source_id":"123","doi":null,"nodes":[],"edges":[]}
+```
+
+Actual records contain the Publication node plus metadata and extracted nodes.
+Nodes have `id`, `label`, `name`, and `properties`. Edges have `source`, `target`,
+`relation`, and `properties`. New extraction output has **no embeddings**.
+Files are named `graph_publications-000001.jsonl` and rotate at 1,000 records.
+Publications without abstracts produce metadata-only graphs without model calls.
+Invalid inputs or model results print errors and processing continues.
+Schema validation is not fact-checking: review representative extraction results.
+
+## Restart and identity
+
+At startup, each extractor scans its output directory once and stores completed
+paper IDs in memory. Restarting skips those IDs before model calls and appends
+to the final file. Failed extractions are not marked complete.
+Progress prints the number already saved at startup, the current file, and
+scanned/saved/skipped/failed counts plus graphs/minute after each extraction
+attempt and file. Long skip-only scans report progress every 1,000 input records.
+An incomplete final JSONL line must be repaired before appending.
+Use only one writer per output directory.
+
+Publication identity is `paper:{URL-quoted source}:{URL-quoted source_id}`.
+Author provider IDs are source-scoped; missing IDs use the publication ID and
+author position. Semantic IDs are shared across papers by exact ID, not DOI or
+semantic similarity. Different IDs for synonyms remain separate.
+
+The extractors no longer query PostgreSQL. Existing database-only papers can
+therefore be extracted again, incurring cloud extraction cost, unless their
+graphs already exist in the chosen output directory. Switching providers reuses
+the same completion set in `src/graph_extracted`. The loader still skips already committed papers.
+Do not delete extraction output if it is needed for restart or replay.
+
+## Shared embedding and loading
+
+The loader reads `src/graph_extracted`. It validates records and filters older entity-to-entity
+edges without modifying source files. It checks committed Publication IDs before
+paid calls and deduplicates repeated papers within a group.
+
+Only semantic node names receive embeddings. It reuses stored vectors for
+matching node IDs/names and deduplicates new names within a loading group.
+OpenAI `text-embedding-3-small` produces **512-dimensional** vectors, with at
+most 256 inputs per embedding request. Publication, Author, and Reference nodes
+do not receive new embeddings through this pipeline.
+
+Nodes and edges are deduplicated before bulk upsert. Nodes are inserted before
+edges and the group commits atomically. Conflicting shared IDs/names are rejected
+instead of silently replacing a stored vector with an unrelated one.
+Node properties merge; existing names/labels are not overwritten. Edge identity
+is `(source, target, relation)` and its properties merge on conflict.
+
+The loader saves ready graphs, including 512-dimensional vector arrays, in
+`src/graph_output/graph_publications-000001.jsonl`, rotating at **1,000 publication
+graphs per file**, independently of the database batch size. It resumes the last
+numbered file on restart and counts that file only once per startup. Existing
+UUID archives are left untouched. Incomplete final lines must be repaired before
+appending. Use one archive writer at a time. Raw extraction files remain unchanged.
+
+Failed database groups roll back, print the paper IDs, and processing continues.
+Ready files are saved **before** insertion: they mean ready to load, not confirmed
+committed. PostgreSQL remains the authority for committed publications.
+To replay ready files without regenerating embeddings, change the bottom call to
+`run(input_dir=READY_DIR, batch_size=100)`. The loader uses their saved vectors,
+skips committed papers, and does not create another archive when replaying this
+directory. A normal rerun against raw extraction files can re-embed an uncommitted
+group, so use the ready files after a database failure. Failure before the ready
+file is saved can still require embedding again. No LLM re-extraction is needed.
+
+Run the loader after extraction finishes, or rerun it afterward if reading while
+an extractor is still appending. Run only one loader at a time to avoid
+check/insert races and duplicate paid embedding calls.
+
+## Database and existing data
+
+The loader uses existing `kg_nodes` and `kg_edges` tables with vector(512).
+No schema migration is required. **Do not rerun the table-dropping setup script
+against populated tables.**
+
+Existing saved files and database rows are not deleted or migrated. Previously
+committed entity-to-entity edges remain until explicitly cleaned up.
+Removing these edges reduces edge storage, not the number of shared node vectors.
+Files previously written to `src/graph_local` are left untouched and are no longer
+read by default. They can be loaded once with `run(input_dir=Path(...))`; do not
+overwrite identically named files when consolidating old outputs.
