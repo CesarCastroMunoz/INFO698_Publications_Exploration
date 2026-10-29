@@ -60,6 +60,92 @@ def search_publications(prompt, top_k=10):
     df = pd.DataFrame([dict(result) for result in results])
     return df
 
+def publications_summary():
+    '''Generate a summary of all publications in the database.'''
+    conn = psycopg2.connect(connection_string)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""
+        SELECT p.source, count(p.source_id) as pub_count
+        FROM publications p 
+        GROUP BY p.source;""")
+    results = cursor.fetchall()
+    conn.close()
+    df = pd.DataFrame([dict(result) for result in results])
+    return df
+
+def top_topics(top_k=10):
+    '''Get the top topics (sources) with the most publications.'''
+    conn = psycopg2.connect(connection_string)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""
+        SELECT p.source, count(p.source_id) as publication_count
+        FROM publications p 
+        GROUP BY p.source
+        ORDER BY publication_count DESC
+        LIMIT %s;""", (top_k,))
+    results = cursor.fetchall()
+    conn.close()
+    df = pd.DataFrame([dict(result) for result in results])
+    return df
+
+def get_example_kg_publication():
+    '''Get an example publication from the database.'''
+    conn = psycopg2.connect(connection_string)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""
+            WITH eligible_conditions AS (
+                SELECT c.id, c.name
+                FROM kg_nodes AS c
+                WHERE c.label = 'Medical_Condition'
+                AND EXISTS (
+                    SELECT 1
+                    FROM kg_edges AS condition_edge
+                    JOIN kg_nodes AS paper
+                        ON paper.id = condition_edge.source
+                    AND paper.label = 'Publication'
+                    JOIN kg_edges AS method_edge
+                        ON method_edge.source = paper.id
+                    AND method_edge.relation = 'USES_METHOD'
+                    JOIN kg_nodes AS method
+                        ON method.id = method_edge.target
+                    AND method.label = 'Method'
+                    WHERE condition_edge.target = c.id
+                        AND condition_edge.relation = 'STUDIES_CONDITION'
+                )
+            ),
+            random_conditions AS (
+                SELECT id, name
+                FROM eligible_conditions
+                ORDER BY random()
+                LIMIT 10
+            )
+            SELECT
+                c.name AS medical_condition,
+                associated.paper_title,
+                associated.method
+            FROM random_conditions AS c
+            CROSS JOIN LATERAL (
+                SELECT paper.name AS paper_title, method.name AS method
+                FROM kg_edges AS condition_edge
+                JOIN kg_nodes AS paper
+                ON paper.id = condition_edge.source
+                AND paper.label = 'Publication'
+                JOIN kg_edges AS method_edge
+                ON method_edge.source = paper.id
+                AND method_edge.relation = 'USES_METHOD'
+                JOIN kg_nodes AS method
+                ON method.id = method_edge.target
+                AND method.label = 'Method'
+                WHERE condition_edge.target = c.id
+                AND condition_edge.relation = 'STUDIES_CONDITION'
+                ORDER BY random()
+                LIMIT 1
+            ) AS associated
+            ORDER BY c.name;""")
+    results = cursor.fetchall()
+    conn.close()
+    df = pd.DataFrame([dict(result) for result in results])
+    return df
 
 if __name__ == "__main__":
     # Test the search_publications function with a sample prompt
