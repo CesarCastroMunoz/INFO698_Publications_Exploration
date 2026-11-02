@@ -32,7 +32,7 @@ def get_embedding(text):
     return embedder.embed_query(text)
 
 
-def search_publications(prompt, top_k=10):
+def search_publications(prompt, top_k=10, abstract=False):
     '''Search for publications related to the given prompt using OpenAI embeddings.
     https://help.openai.com/en/articles/6824809-embeddings-faq'''
     embedding = get_embedding(prompt)
@@ -52,9 +52,13 @@ def search_publications(prompt, top_k=10):
                 authors,
                 embedding <=> %s::vector AS distance
         FROM publications
+        WHERE (
+                    NOT %s
+                    OR (abstract IS NOT NULL AND BTRIM(abstract) <> '')
+                )
         ORDER BY embedding <=> %s::vector
         LIMIT %s
-    """, (embedding, embedding, top_k))
+    """, (embedding, abstract, embedding, top_k))
     results = cursor.fetchall()
     conn.close()
     df = pd.DataFrame([dict(result) for result in results])
@@ -73,6 +77,27 @@ def publications_summary():
     df = pd.DataFrame([dict(result) for result in results])
     return df
 
+def publication_date_distribution():
+    '''Get the distribution of publication dates (max and min dates included).'''
+    conn = psycopg2.connect(connection_string)
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor.execute("""
+        SELECT max(publication_date) as max_date, min(publication_date) as min_date
+        FROM publications
+        ;""")
+    results = cursor.fetchall()
+    conn.close()
+    df = pd.DataFrame([dict(result) for result in results])
+
+    today = pd.Timestamp.now().date()
+    if not df.empty:
+        for column in ("max_date", "min_date"):
+            value = df.at[0, column]
+            if pd.notna(value) and value > today:
+                df.at[0, column] = today
+
+    return df
+
 def top_topics(top_k=10):
     '''Get the top topics (sources) with the most publications.'''
     conn = psycopg2.connect(connection_string)
@@ -89,7 +114,7 @@ def top_topics(top_k=10):
     return df
 
 def get_example_kg_publication():
-    '''Get an example publication from the database.'''
+    '''Sample up to 10 examples from a bounded pool of 100 eligible conditions.'''
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("""
@@ -112,18 +137,13 @@ def get_example_kg_publication():
                     WHERE condition_edge.target = c.id
                         AND condition_edge.relation = 'STUDIES_CONDITION'
                 )
-            ),
-            random_conditions AS (
-                SELECT id, name
-                FROM eligible_conditions
-                ORDER BY random()
-                LIMIT 10
+                LIMIT 100
             )
             SELECT
                 c.name AS medical_condition,
                 associated.paper_title,
                 associated.method
-            FROM random_conditions AS c
+            FROM eligible_conditions AS c
             CROSS JOIN LATERAL (
                 SELECT paper.name AS paper_title, method.name AS method
                 FROM kg_edges AS condition_edge
@@ -138,14 +158,13 @@ def get_example_kg_publication():
                 AND method.label = 'Method'
                 WHERE condition_edge.target = c.id
                 AND condition_edge.relation = 'STUDIES_CONDITION'
-                ORDER BY random()
                 LIMIT 1
             ) AS associated
             ORDER BY c.name;""")
     results = cursor.fetchall()
     conn.close()
     df = pd.DataFrame([dict(result) for result in results])
-    return df
+    return df.sample(n=min(10, len(df))).reset_index(drop=True)
 
 if __name__ == "__main__":
     # Test the search_publications function with a sample prompt
