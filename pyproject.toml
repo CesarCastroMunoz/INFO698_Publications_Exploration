@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "CesarCastroMunoz", email = "cgcastro@arizona.edu" }
 ]
-requires-python = ">=3.10"
+requires-python = "==3.12.*"
 dependencies = [
     "arxiv>=4.0.1",
     "langchain-openai>=1.7.2",
@@ -19,8 +19,8 @@ dependencies = [
     "pyalex>=0.21",
     "python-dotenv>=1.2.4",
     "requests>=2.34.2",
-    "streamlit>=1.65.0",
-    "streamlit-agraph>=0.0.45",
+    "streamlit==1.66.1",
+    "streamlit-agraph==0.0.45",
 ]
 
 [tool.uv]

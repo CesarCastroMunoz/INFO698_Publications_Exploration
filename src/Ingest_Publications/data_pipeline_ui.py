@@ -44,40 +44,60 @@ class IngestPublicationsApp:
             from_date = st.date_input("From publication date", value=date(2024, 1, 1), min_value=date(1800, 1, 1), max_value=date.today())
             to_date = st.date_input("To publication date", value=date.today(), min_value=date(1800, 1, 1), max_value=date.today())
             st.caption("OpenAlex uses the start date only. Semantic Scholar uses the selected start and end years.")
-            submitted = st.form_submit_button("Search and Ingest")
+            st.markdown("**Pipeline steps to run**")
+            run_openalex = st.checkbox("Search OpenAlex", value=True)
+            run_semantic = st.checkbox("Search Semantic Scholar", value=True)
+            run_ingest = st.checkbox("Ingest to VectorDB", value=True)
+            run_extract = st.checkbox("Extract Graphs", value=True)
+            run_embed = st.checkbox("Embed and Load Graphs", value=True)
+            submitted = st.form_submit_button("Run Selected Steps")
         if submitted:
-            if from_date > to_date:
-                st.warning("The start date must be on or before the end date.")
+            if not any([run_openalex, run_semantic, run_ingest, run_extract, run_embed]):
+                st.warning("Select at least one pipeline step.")
                 return
-            self.process_topic(health_input, ai_input, max_results, from_date, to_date)
-            self.ingest_to_vectorDB()
-            self.extract_graphs()
-            self.embed_and_load_graphs()
+            if run_openalex or run_semantic:
+                if from_date > to_date:
+                    st.warning("The start date must be on or before the end date.")
+                    return
+                if not self.process_topic(health_input, ai_input, max_results, from_date, to_date,
+                                          search_openalex=run_openalex, search_semantic=run_semantic):
+                    return
+            if run_ingest:
+                self.ingest_to_vectorDB()
+            if run_extract:
+                self.extract_graphs()
+            if run_embed:
+                self.embed_and_load_graphs()
 
-    def process_topic(self, health_input, ai_input, max_results=1000, from_date=None, to_date=None):
+    def process_topic(self, health_input, ai_input, max_results=1000, from_date=None, to_date=None,
+                      search_openalex=True, search_semantic=True):
+        '''Run the selected searches. Returns False when the input is invalid.'''
         health = list(dict.fromkeys(term.strip() for term in health_input.splitlines() if term.strip()))
         ai = list(dict.fromkeys(term.strip() for term in ai_input.splitlines() if term.strip()))
         if not health or not ai:
             st.warning("Enter at least one health term and one AI term.")
-            return
+            return False
         if any('"' in term for term in health + ai):
             st.warning("Enter terms without double quotes; phrase quotes are added automatically.")
-            return
+            return False
         health = [f'"{term}"' for term in health]
         ai = [f'"{term}"' for term in ai]
         openalex_topic = f"({' OR '.join(health)}) AND ({' OR '.join(ai)})"
         semantic_topic = f"({' | '.join(health)}) + ({' | '.join(ai)})"
         with st.spinner("Searching publications..."):
-            openalex_search_topic(
-                openalex_topic, max_results=max_results,
-                from_date=from_date.isoformat() if from_date else "2024-01-01",
-            )
-            semantic_scholar_search_topic(
-                semantic_topic, max_results=max_results,
-                year_range=f"{from_date.year}-{to_date.year}" if from_date and to_date else "2000-",
-            )
+            if search_openalex:
+                openalex_search_topic(
+                    openalex_topic, max_results=max_results,
+                    from_date=from_date.isoformat() if from_date else "2024-01-01",
+                )
+            if search_semantic:
+                semantic_scholar_search_topic(
+                    semantic_topic, max_results=max_results,
+                    year_range=f"{from_date.year}-{to_date.year}" if from_date and to_date else "2000-",
+                )
 
         st.success("Search completed. Publications saved to local JSONL files.")
+        return True
 
     def ingest_to_vectorDB(self):
         with st.spinner("Ingesting publications to vector DB..."):
