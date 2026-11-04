@@ -4,8 +4,22 @@ import streamlit as st
 
 pages_dir = Path(__file__).parent / "pages"
 
+def render_banner(title):
+    """Small banner that fades from blue (left) to white (right)."""
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(90deg, #1F4E79 0%, #1F4E79 45%, #FFFFFF 100%);
+                    color: #FFFFFF; padding: 0.6rem 1.2rem; border-radius: 6px;
+                    font-size: 1.05rem; font-weight: 600; letter-spacing: 0.02em;
+                    margin-bottom: 1rem;">
+            {title}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 st.set_page_config(
-    page_title="Interactive Semantic Exploration of Academic Literature",
+    render_banner("Interactive Semantic Exploration of Academic Literature"),
     layout="wide",
 )
 

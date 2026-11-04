@@ -1,0 +1,10 @@
+[theme]
+base = "light"                      # always start in light mode
+primaryColor = "#1F4E79"            # buttons, links, highlights
+backgroundColor = "#FFFFFF"         # main page background
+secondaryBackgroundColor = "#F3F6FA"  # sidebar, cards, inputs
+textColor = "#1B2430"
+font = "sans serif"                 # also: "serif" or "monospace"
+
+[client]
+toolbarMode = "viewer"              # hides developer menu items for end users

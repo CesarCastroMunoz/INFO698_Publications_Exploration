@@ -12,6 +12,7 @@ RUN uv pip install --system -r pyproject.toml
 
 # Copy application code only; supply secrets through runtime environment variables.
 COPY src/ /app/src/
+COPY .streamlit/ /app/.streamlit/
 
 # Document the container port; publish it with docker run -p 8000:8000.
 EXPOSE 8000
