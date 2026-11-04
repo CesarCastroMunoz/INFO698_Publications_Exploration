@@ -12,6 +12,7 @@ import psycopg2.extras
 from openai import OpenAI
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
+from streamlit_agraph import Node, Edge
 from pgvector.psycopg2 import register_vector
 
 from pathlib import Path
@@ -114,57 +115,286 @@ def top_topics(top_k=10):
     return df
 
 def get_example_kg_publication():
-    '''Sample up to 10 examples from a bounded pool of 100 eligible conditions.'''
+    '''Return one random example: a medical condition, a paper studying it, and a method it uses.'''
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    cursor.execute("""
-            WITH eligible_conditions AS (
-                SELECT c.id, c.name
-                FROM kg_nodes AS c
-                WHERE c.label = 'Medical_Condition'
-                AND EXISTS (
-                    SELECT 1
-                    FROM kg_edges AS condition_edge
-                    JOIN kg_nodes AS paper
-                        ON paper.id = condition_edge.source
-                    AND paper.label = 'Publication'
-                    JOIN kg_edges AS method_edge
-                        ON method_edge.source = paper.id
-                    AND method_edge.relation = 'USES_METHOD'
-                    JOIN kg_nodes AS method
-                        ON method.id = method_edge.target
-                    AND method.label = 'Method'
-                    WHERE condition_edge.target = c.id
-                        AND condition_edge.relation = 'STUDIES_CONDITION'
-                )
-                LIMIT 100
-            )
-            SELECT
-                c.name AS medical_condition,
-                associated.paper_title,
-                associated.method
-            FROM eligible_conditions AS c
-            CROSS JOIN LATERAL (
-                SELECT paper.name AS paper_title, method.name AS method
-                FROM kg_edges AS condition_edge
-                JOIN kg_nodes AS paper
-                ON paper.id = condition_edge.source
-                AND paper.label = 'Publication'
-                JOIN kg_edges AS method_edge
-                ON method_edge.source = paper.id
-                AND method_edge.relation = 'USES_METHOD'
-                JOIN kg_nodes AS method
-                ON method.id = method_edge.target
-                AND method.label = 'Method'
-                WHERE condition_edge.target = c.id
-                AND condition_edge.relation = 'STUDIES_CONDITION'
-                LIMIT 1
-            ) AS associated
-            ORDER BY c.name;""")
-    results = cursor.fetchall()
+    # TABLESAMPLE reads only a random fraction of kg_edges (0.1% is ~23k of 23M rows) instead of
+    # the whole table. ORDER BY random() over that small sample avoids always picking the
+    # first rows of the table. If a sample has no match, retry with a larger one.
+    for percent in (0.1, 1):
+        cursor.execute(f"""
+            SELECT c.name AS medical_condition, p.name AS paper_title, m.name AS method
+            FROM kg_edges ce TABLESAMPLE SYSTEM ({percent})
+            JOIN kg_nodes c ON c.id = ce.target AND c.label = 'Medical_Condition'
+            JOIN kg_nodes p ON p.id = ce.source AND p.label = 'Publication'
+            JOIN kg_edges me ON me.source = ce.source AND me.relation = 'USES_METHOD'
+            JOIN kg_nodes m ON m.id = me.target AND m.label = 'Method'
+            WHERE ce.relation = 'STUDIES_CONDITION'
+            ORDER BY random()
+            LIMIT 1;""")
+        results = cursor.fetchall()
+        if results:
+            break
     conn.close()
-    df = pd.DataFrame([dict(result) for result in results])
-    return df.sample(n=min(10, len(df))).reset_index(drop=True)
+    return pd.DataFrame([dict(result) for result in results])
+
+
+def search_documents_via_graph(user_query: str):
+    """
+    Return (nodes, edges) for semantic concept matches and connected publications.
+    Nodes include type and properties; edges include relation labels and properties.
+    """
+    # 1. Embed the query (already normalized by OpenAI)
+    query_vector = get_embedding(user_query)
+
+    # 2. SQL to hit the FlatNav index first, then traverse the edges
+    sql_query = """
+        WITH matched_concepts AS (
+            SELECT id, name, label, properties
+            FROM kg_nodes
+            WHERE label IN ('Method', 'Task', 'Medical_Condition', 'Data_Modality', 'Metric')
+            ORDER BY embedding <#> %s::vector
+            LIMIT 5
+        ),
+        connected_documents AS (
+            SELECT 
+                c.id AS concept_id,
+                c.name AS matched_concept,
+                c.label AS concept_type,
+                c.properties AS concept_properties,
+                n.id AS paper_id,
+                n.name AS paper_title,
+                n.properties AS paper_properties,
+                e.source, e.target, e.relation,
+                e.properties AS edge_properties
+            FROM matched_concepts c
+            JOIN kg_edges e ON c.id = e.target OR c.id = e.source
+            JOIN kg_nodes n ON (e.source = n.id OR e.target = n.id)
+            WHERE n.label = 'Publication' AND n.id != c.id
+        )
+        SELECT DISTINCT paper_id, paper_title, paper_properties,
+                        concept_id, matched_concept, concept_type, concept_properties,
+                        source, target, relation, edge_properties
+        FROM connected_documents
+        LIMIT 10;
+    """
+
+    conn = psycopg2.connect(connection_string)
+    try:
+        with conn.cursor() as cur:
+            #https://neon.com/blog/understanding-vector-search-and-hnsw-index-with-pgvector
+            cur.execute("SET hnsw.ef_search = 100;")
+            cur.execute(sql_query, (query_vector,))
+            results = cur.fetchall()
+    finally:
+        conn.close()
+
+    nodes = []
+    edges = []
+    node_ids = set()
+    edge_keys = set()
+
+    for row in results:
+        (paper_id, paper_title, paper_properties,
+         concept_id, matched_concept, concept_type, concept_properties,
+         source, target, relation, edge_properties) = row
+        if paper_id not in node_ids:
+            nodes.append(Node(id=paper_id, label=paper_title, type="Publication", properties=paper_properties,widthConstraint={"maximum": 200}))
+            node_ids.add(paper_id)
+        if concept_id not in node_ids:
+            nodes.append(Node(id=concept_id, label=matched_concept, type=concept_type, properties=concept_properties,widthConstraint={"maximum": 200}))
+            node_ids.add(concept_id)
+        edge_key = (source, target, relation)
+        if edge_key not in edge_keys:
+            edges.append(Edge(source=source, target=target, label=relation, properties=edge_properties))
+            edge_keys.add(edge_key)
+
+    return nodes, edges
+
+def get_one_hop(target_paper_id: str):
+    """Fetches a 1-hop subgraph for a specific paper."""
+    
+    # 1. SQL Query to get all edges and node details connected to the paper
+    query = """
+        SELECT 
+            e.source, sn.name AS source_name, sn.label AS source_label,
+            e.target, tn.name AS target_name, tn.label AS target_label,
+            e.relation, sn.properties AS source_properties,
+            tn.properties AS target_properties
+        FROM kg_edges e
+        JOIN kg_nodes sn ON e.source = sn.id
+        JOIN kg_nodes tn ON e.target = tn.id
+        WHERE e.source = %s OR e.target = %s;
+    """
+    conn = psycopg2.connect(connection_string)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query, (target_paper_id, target_paper_id))
+            results = cur.fetchall()
+    finally:
+        conn.close()
+
+    # 2. Process the results to create nodes and edges for visualization
+    nodes = []
+    edges = []
+    node_ids = set()
+    edge_keys = set()
+
+    for row in results:
+        (src_id, src_name, src_label, tgt_id, tgt_name, tgt_label,
+         relation, src_properties, tgt_properties) = row
+        if src_id not in node_ids:
+            nodes.append(Node(id=src_id, label=src_name, type=src_label, properties=src_properties,widthConstraint={"maximum": 200}))
+            node_ids.add(src_id)
+        if tgt_id not in node_ids:
+            nodes.append(Node(id=tgt_id, label=tgt_name, type=tgt_label, properties=tgt_properties,widthConstraint={"maximum": 200}))
+            node_ids.add(tgt_id)
+        edge_key = (src_id, tgt_id, relation)
+        if edge_key not in edge_keys:
+            edges.append(Edge(source=src_id, target=tgt_id, label=relation))
+            edge_keys.add(edge_key)
+
+    return nodes, edges
+
+def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
+    """Keep the first hop and add up to 5 distinct publication titles.
+
+    Papers are ranked by exact shared concepts first (100% match), then by
+    concepts that are semantically similar to the paper's concepts.
+    """
+
+    # 1. First hop: reuse the one-hop lookup (paper + all directly connected nodes).
+    nodes, edges = get_one_hop(target_paper_id)
+    if not nodes:
+        return nodes, edges
+
+    # Concepts drive the second hop; authors and references are not used for ranking.
+    concept_ids = [n.id for n in nodes if n.type not in ("Publication", "Author", "Reference")]
+    if not concept_ids:
+        return nodes, edges
+
+    first_hop_ids = [n.id for n in nodes]
+    # Skip papers already shown, including copies with the same exact title.
+    first_hop_titles = [n.label for n in nodes if n.type == "Publication"]
+
+    # 2. Rank other papers by the paper's concepts they match.
+    # A concept matches itself exactly, plus its few most similar concepts (embeddings,
+    # HNSW index). The same concept can be stored under different labels or wording,
+    # so similar concepts also link related papers. Exact matches always rank first.
+    # Concept edges are always stored as paper -> concept, so e.target is the concept.
+    ranking_query = """
+        WITH paper_concepts AS (
+            SELECT id, label, embedding
+            FROM kg_nodes
+            WHERE id = ANY(%(concept_ids)s)
+        ),
+        matched_concepts AS (
+            SELECT id AS original_id, id AS concept_id, TRUE AS is_exact
+            FROM paper_concepts
+            UNION ALL
+            -- Similar concepts are only searched for concept types where meaning matters.
+            SELECT c.id, s.id, FALSE
+            FROM paper_concepts c
+            CROSS JOIN LATERAL (
+                SELECT k.id
+                FROM kg_nodes k
+                WHERE k.embedding IS NOT NULL AND k.id <> c.id
+                ORDER BY k.embedding <#> c.embedding
+                LIMIT %(similar_per_concept)s
+            ) s
+            WHERE c.embedding IS NOT NULL
+              AND c.label IN ('Method', 'Task', 'Medical_Condition', 'Condition',
+                              'Data_Modality', 'Metric')
+        ),
+        -- Count on the edges only, then check and de-duplicate just the best candidates.
+        counted AS (
+            SELECT e.source AS id,
+                   COUNT(DISTINCT m.original_id) FILTER (WHERE m.is_exact) AS exact_count,
+                   COUNT(DISTINCT m.original_id) FILTER (WHERE NOT m.is_exact) AS similar_count
+            FROM matched_concepts m
+            JOIN kg_edges e ON e.target = m.concept_id
+            WHERE e.source <> ALL(%(exclude_ids)s)
+            GROUP BY e.source
+            ORDER BY exact_count DESC, similar_count DESC, e.source
+            LIMIT 100
+        ),
+        ranked AS (
+            SELECT p.id, p.name, p.properties, c.exact_count, c.similar_count,
+                   -- Keep only the best-ranked record for each exact title.
+                   ROW_NUMBER() OVER (
+                       PARTITION BY p.name
+                       ORDER BY c.exact_count DESC, c.similar_count DESC, p.id
+                   ) AS title_rank
+            FROM counted c
+            JOIN kg_nodes p ON p.id = c.id AND p.label = 'Publication'
+            WHERE p.name <> ALL(%(exclude_titles)s)
+        )
+        SELECT id, name, properties
+        FROM ranked
+        WHERE title_rank = 1
+        ORDER BY exact_count DESC, similar_count DESC, id
+        LIMIT 5;
+    """
+
+    # 3. Load only the edges linking the selected papers to nodes already in the graph.
+    edges_query = """
+        SELECT
+            e.source, sn.name AS source_name, sn.label AS source_label,
+            e.target, tn.name AS target_name, tn.label AS target_label,
+            e.relation, sn.properties AS source_properties,
+            tn.properties AS target_properties
+        FROM kg_edges e
+        JOIN kg_nodes sn ON sn.id = e.source
+        JOIN kg_nodes tn ON tn.id = e.target
+        WHERE (e.source = ANY(%s) AND e.target = ANY(%s))
+           OR (e.target = ANY(%s) AND e.source = ANY(%s));
+    """
+
+    conn = psycopg2.connect(connection_string)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(ranking_query, {
+                "concept_ids": concept_ids,
+                "similar_per_concept": similar_per_concept,
+                "exclude_ids": first_hop_ids,
+                "exclude_titles": first_hop_titles,
+            })
+            related = cur.fetchall()
+            if not related:
+                return nodes, edges
+
+            related_ids = [paper_id for paper_id, _, _ in related]
+            allowed_ids = first_hop_ids + related_ids
+            cur.execute(edges_query, (related_ids, allowed_ids, related_ids, allowed_ids))
+            results = cur.fetchall()
+    finally:
+        conn.close()
+
+    # 4. Add the new papers and edges, skipping anything already in the graph.
+    node_ids = set(first_hop_ids)
+    edge_keys = {(e.source, e.to, e.label) for e in edges}
+
+    # Papers matched only through similar concepts have no edge to the current graph,
+    # so they are added directly (shown unconnected but related).
+    for paper_id, paper_title, paper_properties in related:
+        nodes.append(Node(id=paper_id, label=paper_title, type="Publication", properties=paper_properties,widthConstraint={"maximum": 200}))
+        node_ids.add(paper_id)
+
+    for row in results:
+        (src_id, src_name, src_label, tgt_id, tgt_name, tgt_label,
+         relation, src_properties, tgt_properties) = row
+        if src_id not in node_ids:
+            nodes.append(Node(id=src_id, label=src_name, type=src_label, properties=src_properties,widthConstraint={"maximum": 200}))
+            node_ids.add(src_id)
+        if tgt_id not in node_ids:
+            nodes.append(Node(id=tgt_id, label=tgt_name, type=tgt_label, properties=tgt_properties,widthConstraint={"maximum": 200}))
+            node_ids.add(tgt_id)
+        edge_key = (src_id, tgt_id, relation)
+        if edge_key not in edge_keys:
+            edges.append(Edge(source=src_id, target=tgt_id, label=relation))
+            edge_keys.add(edge_key)
+
+    return nodes, edges
 
 if __name__ == "__main__":
     # Test the search_publications function with a sample prompt

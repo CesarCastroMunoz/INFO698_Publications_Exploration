@@ -2,6 +2,12 @@ import streamlit as st
 import st_utilities as stu
 
 
+@st.cache_data(ttl=60)
+def load_example():
+    """Reuse the same random example for 60 seconds so clicks don't re-query."""
+    return stu.get_example_kg_publication()
+
+
 class PublicationHomePage:
     def __init__(self):
         self.render()
@@ -28,7 +34,7 @@ class PublicationHomePage:
         dfs.columns = ["Source", "Publication Count"]
         st.dataframe(dfs, width="content")
 
-        df = stu.get_example_kg_publication()        
+        df = load_example()
         if 'example_idx' not in st.session_state:
             st.session_state.example_idx = 0
 
