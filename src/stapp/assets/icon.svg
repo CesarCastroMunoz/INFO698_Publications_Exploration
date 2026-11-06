@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="100%" height="100%">
+  <!-- Definitions for gradients -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" /> <!-- Bright Blue -->
+      <stop offset="100%" stop-color="#1e3a8a" /> <!-- Deep Blue -->
+    </linearGradient>
+    <linearGradient id="lensGlass" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.0" />
+    </linearGradient>
+  </defs>
+
+  <!-- App Icon Background (Rounded Square) -->
+  <rect width="240" height="240" rx="50" fill="url(#bgGradient)" />
+
+  <!-- Lens Handle -->
+  <line x1="160" y1="160" x2="195" y2="195" stroke="#ffffff" stroke-width="22" stroke-linecap="round" />
+  
+  <!-- Lens Handle Base Accent -->
+  <line x1="172" y1="172" x2="195" y2="195" stroke="#93c5fd" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Lens Outer Ring -->
+  <circle cx="105" cy="105" r="65" stroke="#ffffff" stroke-width="14" fill="url(#lensGlass)" />
+
+  <!-- Knowledge Graph / Vector Nodes (Inside the Lens) -->
+  <g stroke="#ffffff" stroke-width="4" stroke-linecap="round" opacity="0.9">
+    <!-- Connecting Edges -->
+    <line x1="75" y1="95" x2="110" y2="70" />
+    <line x1="110" y1="70" x2="135" y2="115" />
+    <line x1="75" y1="95" x2="95" y2="135" />
+    <line x1="95" y1="135" x2="135" y2="115" />
+    <line x1="110" y1="70" x2="95" y2="135" />
+  </g>
+
+  <!-- Graph Data Points -->
+  <!-- Primary Node -->
+  <circle cx="110" cy="70" r="10" fill="#ffffff" />
+  <!-- Secondary Nodes -->
+  <circle cx="75" cy="95" r="7" fill="#93c5fd" stroke="#ffffff" stroke-width="2" />
+  <circle cx="135" cy="115" r="8" fill="#93c5fd" stroke="#ffffff" stroke-width="2" />
+  <circle cx="95" cy="135" r="6" fill="#bfdbfe" stroke="#ffffff" stroke-width="2" />
+
+  <!-- LLM / AI Sparkles -->
+  <!-- Top Left Sparkle -->
+  <path d="M 45 35 Q 55 35 55 25 Q 55 35 65 35 Q 55 35 55 45 Q 55 35 45 35 Z" fill="#ffffff" opacity="0.9" />
+  <!-- Bottom Right Sparkle -->
+  <path d="M 145 45 Q 150 45 150 40 Q 150 45 155 45 Q 150 45 150 50 Q 150 45 145 45 Z" fill="#bfdbfe" opacity="0.8" />
+</svg>

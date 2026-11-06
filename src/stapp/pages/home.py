@@ -21,18 +21,80 @@ class PublicationHomePage:
         max_date = df_date_dist["max_date"].iloc[0] if not df_date_dist.empty else None
         min_date = df_date_dist["min_date"].iloc[0] if not df_date_dist.empty else None
 
-        st.title("Interactive Semantic Exploration of Academic Literature")
-
-        st.markdown(
-            "Explore academic literature through an interactive semantic interface.<br>"
-            f"Total Available publications: {total_publications}.<br>"
-            f"Publication Date Range: {min_date} to {max_date}.<br>"
-            "Publication Summary:",
-            unsafe_allow_html=True,
+        st.caption(
+            "Discover academic literature through semantic search "
+            "and connected research concepts."
         )
 
-        dfs.columns = ["Source", "Publication Count"]
-        st.dataframe(dfs, width="content")
+        details_column, chart_column = st.columns([1, 1], gap="large")
+        with details_column:
+            with st.container(border=True):
+                st.markdown("### Collection Overview")
+                st.metric("Available publications", f"{total_publications:,}")
+                st.caption("PUBLICATION DATE RANGE")
+                if min_date is not None and max_date is not None:
+                    st.markdown(f"**{min_date}** to **{max_date}**")
+                else:
+                    st.caption("Date range unavailable.")
+
+        with chart_column:
+            st.subheader("Publications by Source")
+            if total_publications == 0:
+                st.info("No publications available to display.")
+            else:
+                st.vega_lite_chart(
+                    dfs,
+                    {
+                        "height": 174,
+                        "autosize": {"type": "fit-x", "contains": "padding"},
+                        "padding": {"top": 12, "right": 12, "bottom": 12, "left": 12},
+                        "transform": [
+                            {
+                                "joinaggregate": [
+                                    {"op": "sum", "field": "pub_count", "as": "total"}
+                                ]
+                            },
+                            {
+                                "calculate": "datum.pub_count / datum.total",
+                                "as": "percentage",
+                            },
+                        ],
+                        "mark": {
+                            "type": "arc",
+                            "innerRadius": 40,
+                            "outerRadius": 75,
+                            "cornerRadius": 4,
+                            "padAngle": 0.02,
+                        },
+                        "encoding": {
+                            "theta": {"field": "pub_count", "type": "quantitative"},
+                            "color": {
+                                "field": "source",
+                                "type": "nominal",
+                                "title": "Source",
+                                "scale": {"scheme": "tableau10"},
+                                "legend": {"orient": "right", "direction": "vertical"},
+                            },
+                            "tooltip": [
+                                {"field": "source", "type": "nominal", "title": "Source"},
+                                {
+                                    "field": "pub_count",
+                                    "type": "quantitative",
+                                    "title": "Publications",
+                                    "format": ",",
+                                },
+                                {
+                                    "field": "percentage",
+                                    "type": "quantitative",
+                                    "title": "Share",
+                                    "format": ".1%",
+                                },
+                            ],
+                        },
+                        "config": {"view": {"stroke": None}},
+                    },
+                    width="stretch",
+                )
 
         df = load_example()
         if 'example_idx' not in st.session_state:

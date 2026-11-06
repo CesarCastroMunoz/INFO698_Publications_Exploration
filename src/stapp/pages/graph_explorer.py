@@ -1,19 +1,14 @@
 import streamlit as st
 from psycopg2 import Error
-from streamlit_agraph import agraph, Node, Edge, Config
+from streamlit_agraph import Node, Edge
 import st_utilities
+import graph_utilities
 import math
 
 @st.cache_data(ttl=300)
 def load_one_hop(target_paper_id: str):
     """Load graph nodes with their stored properties."""
     return st_utilities.get_one_hop(target_paper_id)
-
-
-@st.cache_data(ttl=300)
-def load_two_hops(target_paper_id: str):
-    """Cache two-hop graph results for five minutes per paper."""
-    return st_utilities.get_two_hops(target_paper_id)
 
 
 class GraphExplorer:
@@ -30,26 +25,17 @@ class GraphExplorer:
     def get_one_hop(self, target_paper_id: str):
         self.nodes, self.edges = load_one_hop(target_paper_id)
 
-    def get_two_hops(self, target_paper_id: str):
-        self.nodes, self.edges = load_two_hops(target_paper_id)
-
-    def semantic_search(self, query: str):
-        self.nodes, self.edges = st_utilities.search_documents_via_graph(query)
+    def semantic_search(self, condition: str, method: str):
+        '''Search the filled inputs together: papers related to both come first, then the others.'''
+        queries = [text for text in (condition, method) if text]
+        self.nodes, self.edges = st_utilities.search_documents_via_graph(queries)
 
     def explore_one_paper(self, target_paper_id: str, ref_filter=True):
         ''' After user click a paper trigger another graph display for that paper '''
         if target_paper_id:
             try:
                 #self.get_one_hop(target_paper_id)
-                self.get_two_hops(target_paper_id)
-                
-                if ref_filter:
-                    self.nodes = [node for node in self.nodes if node.type != "Reference"]
-                    node_ids = {node.id for node in self.nodes}
-                    self.edges = [
-                        edge for edge in self.edges
-                        if edge.source in node_ids and edge.to in node_ids
-                    ]
+                self.nodes, self.edges = graph_utilities.load_paper_graph(target_paper_id, ref_filter)
             except Error:
                 st.error("Unable to load the graph from the database. Please try again.")
                 return
@@ -60,70 +46,6 @@ class GraphExplorer:
             else:
                 st.info("Enter a Paper ID to display its relationships.")
         else:        
-            # config = Config(
-            #     width=700,
-            #     height=800,
-            #     directed=True,
-            #     hierarchical=False,
-            #     direction="LR",
-            #     sortMethod="directed",
-            #     levelSeparation=200,
-            #     nodeSpacing=160,
-            #     treeSpacing=200,
-            #     physics=True,
-            #     edges={
-            #         "arrows": "to",
-            #         "smooth": {
-            #             "enabled": True,
-            #             "type": "cubicBezier",
-            #             "forceDirection": "horizontal",
-            #         },
-            #         "font": {"size": 11, "align": "middle"},
-            #     },
-            # )
-
-            config = Config(
-                width="100%",
-                height=600,
-                directed=True,
-                hierarchical=False, 
-                # Note: levelSeparation and nodeSpacing were removed because they only do something if hierarchical=True
-                physics={
-                    "enabled": True,
-                    "solver": "forceAtlas2Based", # Better for separating distinct groups
-                    "forceAtlas2Based": {
-                        "gravitationalConstant": -30000, # Pushes distinct groups apart
-                        "centralGravity": 0.01,        # Gentle pull to keep them on screen
-                        "springLength": 80,            # SHORT springs to pull connected nodes close together
-                        "springConstant": 0.08,        # STIFF springs so groups don't stretch out
-                        "damping": 0.4,                # Higher damping to stop the groups from endlessly spinning
-                        "avoidOverlap": 1,             # Strictly prevents node bounding boxes from touching
-                    },
-                    "minVelocity": 0.75,
-                    "stabilization": {
-                        "enabled": True,
-                        "iterations": 1000,
-                        "fit": True,
-                    }
-                },
-                edges={
-                    "arrows": "to",
-                    "font": {"size": 11, "align": "middle"},
-                },
-            )
-
-            colors = {
-                "Publication": "#4C78A8",
-                "Method": "#F58518",
-                "Task": "#54A24B",
-                "Medical_Condition": "#E45756",
-                "Data_Modality": "#B279A2",
-                "Metric": "#FFCA3A",
-            }
-
-            for node in self.nodes:
-                node.color = colors.get(node.type, "#AAAAAA")   
-
             paper = next(
                 (node for node in self.nodes if node.id == target_paper_id), None
             )
@@ -131,9 +53,8 @@ class GraphExplorer:
             if paper is not None:
                 st.subheader(paper.label)
             graph_column, abstract_column = st.columns([2, 1])
-            config.width = "100%"
             with graph_column:
-                clicked_paper = agraph(nodes=self.nodes, edges=self.edges, config=config)
+                clicked_paper = graph_utilities.draw_graph(self.nodes, self.edges)
                 selected_paper = next(
                     (node for node in self.nodes if node.id == clicked_paper), None
                 )
@@ -158,80 +79,39 @@ class GraphExplorer:
                 if abstract and abstract.strip():
                     st.write(abstract)
                 else:
+                    st.write("No abstract available.")
                     st.info("No abstract available for this paper.")
 
     def render(self, ref_filter=True):
         st.title("Publications Explorer")
 
-        search_prompt = st.text_input("Search:").strip()
+        with st.form("graph_search"):
+            condition_column, method_column, button_column = st.columns([3, 3, 1], vertical_alignment="bottom")
+            condition = condition_column.text_input("Medical Condition or Topic:").strip()
+            method = method_column.text_input("Method or Task:").strip()
+            button_column.form_submit_button("Search", width="stretch")
+        search_prompt = (condition, method)
         if st.session_state.get("graph_search_prompt") != search_prompt:
             st.session_state["graph_search_prompt"] = search_prompt
             st.session_state.pop("explored_paper_id", None)
             st.session_state.pop("graph_search_selection", None)
-        if search_prompt:
+        if condition or method:
             try:
-                self.semantic_search(search_prompt)
+                self.semantic_search(condition, method)
                 if ref_filter:
-                    self.nodes = [node for node in self.nodes if node.type != "Reference"]
-                    node_ids = {node.id for node in self.nodes}
-                    self.edges = [
-                        edge for edge in self.edges
-                        if edge.source in node_ids and edge.to in node_ids
-                    ]
+                    self.nodes, self.edges = graph_utilities.remove_references(self.nodes, self.edges)
             except Error:
                 st.error("Unable to load the graph from the database. Please try again.")
                 return
 
         if not self.nodes and not self.edges:
-            if search_prompt:
-                st.info("No relationships found. The search query may not match any documents.")
+            if condition or method:
+                st.info("No relationships found. The search may not match any documents.")
             else:
-                st.info("Enter a search query to display its relationships.")
+                st.info("Enter a medical condition, a method, or both to display their relationships.")
         else:        
-            config = Config(
-                width="100%",
-                height=600,
-                directed=True,
-                hierarchical=False, 
-                # Note: levelSeparation and nodeSpacing were removed because they only do something if hierarchical=True
-                physics={
-                    "enabled": True,
-                    "solver": "forceAtlas2Based", # Better for separating distinct groups
-                    "forceAtlas2Based": {
-                        "gravitationalConstant": -30000, # Pushes distinct groups apart
-                        "centralGravity": 0.01,        # Gentle pull to keep them on screen
-                        "springLength": 80,            # SHORT springs to pull connected nodes close together
-                        "springConstant": 0.08,        # STIFF springs so groups don't stretch out
-                        "damping": 0.4,                # Higher damping to stop the groups from endlessly spinning
-                        "avoidOverlap": 1,             # Strictly prevents node bounding boxes from touching
-                    },
-                    "minVelocity": 0.75,
-                    "stabilization": {
-                        "enabled": True,
-                        "iterations": 1000,
-                        "fit": True,
-                    }
-                },
-                edges={
-                    "arrows": "to",
-                    "font": {"size": 11, "align": "middle"},
-                },
-            )
-
-            colors = {
-                "Publication": "#4C78A8",
-                "Method": "#F58518",
-                "Task": "#54A24B",
-                "Medical_Condition": "#E45756",
-                "Data_Modality": "#B279A2",
-                "Metric": "#FFCA3A",
-            }
-
-            for node in self.nodes:
-                node.color = colors.get(node.type, "#AAAAAA")   
-
             st.write("Click on a publication node to explore it")
-            clicked_node = agraph(nodes=self.nodes, edges=self.edges, config=config)
+            clicked_node = graph_utilities.draw_graph(self.nodes, self.edges)
 
             if clicked_node:
                 selected_node = next(

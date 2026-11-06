@@ -25,6 +25,8 @@ openai_api_key = os.environ.get("OPENAI_KEY")
 EMBEDDING_MODEL = "text-embedding-3-small"
 LLM_MODEL = "gpt-6-luna" 
 DIMENSION = 512
+MIN_CONCEPT_SIMILARITY = 0.4  # cosine similarity cutoff for concept matches; tune with test queries
+CONCEPTS_PER_QUERY = 5  # nearest concepts kept for each query
 
 
 def get_embedding(text):
@@ -139,44 +141,59 @@ def get_example_kg_publication():
     return pd.DataFrame([dict(result) for result in results])
 
 
-def search_documents_via_graph(user_query: str):
+def search_documents_via_graph(user_queries: list[str]):
     """
-    Return (nodes, edges) for semantic concept matches and connected publications.
+    Return (nodes, edges) for the concepts that match each query and the publications connected to them.
+    Each query is matched on its own. Publications related to the most queries come first,
+    then the ones with the closest concepts; publications related to only some queries still follow.
     Nodes include type and properties; edges include relation labels and properties.
     """
-    # 1. Embed the query (already normalized by OpenAI)
-    query_vector = get_embedding(user_query)
+    # 1. Embed each query on its own (already normalized by OpenAI)
+    vectors = [get_embedding(query) for query in user_queries]
+    terms = ", ".join(f"({index}, %s::vector)" for index in range(len(vectors)))
 
-    # 2. SQL to hit the FlatNav index first, then traverse the edges
-    sql_query = """
-        WITH matched_concepts AS (
-            SELECT id, name, label, properties
-            FROM kg_nodes
-            WHERE label IN ('Method', 'Task', 'Medical_Condition', 'Data_Modality', 'Metric')
-            ORDER BY embedding <#> %s::vector
-            LIMIT 5
+    # 2. SQL to hit the FlatNav index first for each query, then traverse the edges.
+    # Concept edges are stored as publication -> concept, so e.target is the concept.
+    sql_query = f"""
+        WITH terms(term, embedding) AS (VALUES {terms}),
+        matched_concepts AS (
+            SELECT t.term, c.id, c.name, c.label, c.properties, c.similarity
+            FROM terms t
+            CROSS JOIN LATERAL (
+                SELECT id, name, label, properties, -(embedding <#> t.embedding) AS similarity
+                FROM kg_nodes
+                WHERE label IN ('Method', 'Task', 'Medical_Condition', 'Data_Modality', 'Metric')
+                ORDER BY embedding <#> t.embedding
+                LIMIT {CONCEPTS_PER_QUERY}
+            ) c
+            WHERE c.similarity >= %s
         ),
-        connected_documents AS (
-            SELECT 
-                c.id AS concept_id,
-                c.name AS matched_concept,
-                c.label AS concept_type,
-                c.properties AS concept_properties,
-                n.id AS paper_id,
-                n.name AS paper_title,
-                n.properties AS paper_properties,
-                e.source, e.target, e.relation,
-                e.properties AS edge_properties
-            FROM matched_concepts c
-            JOIN kg_edges e ON c.id = e.target OR c.id = e.source
-            JOIN kg_nodes n ON (e.source = n.id OR e.target = n.id)
-            WHERE n.label = 'Publication' AND n.id != c.id
+        -- Rank on the edges only (no node details), so popular concepts stay cheap.
+        paper_terms AS (
+            SELECT e.source AS paper_id, m.term, MAX(m.similarity) AS best_similarity
+            FROM matched_concepts m
+            JOIN kg_edges e ON e.target = m.id
+            GROUP BY e.source, m.term
+        ),
+        ranked_papers AS (
+            -- More matched queries first, then the best concept similarity found for each query
+            SELECT paper_id, COUNT(*) AS terms_matched, SUM(best_similarity) AS score
+            FROM paper_terms
+            GROUP BY paper_id
+            ORDER BY terms_matched DESC, score DESC, paper_id
+            LIMIT 10
         )
-        SELECT DISTINCT paper_id, paper_title, paper_properties,
-                        concept_id, matched_concept, concept_type, concept_properties,
-                        source, target, relation, edge_properties
-        FROM connected_documents
-        LIMIT 10;
+        -- Load the details only for the best papers and their matched concepts.
+        SELECT DISTINCT n.id AS paper_id, n.name AS paper_title, n.properties AS paper_properties,
+                        m.id AS concept_id, m.name AS matched_concept, m.label AS concept_type,
+                        m.properties AS concept_properties,
+                        e.source, e.target, e.relation, e.properties AS edge_properties,
+                        r.terms_matched, r.score
+        FROM ranked_papers r
+        JOIN kg_nodes n ON n.id = r.paper_id AND n.label = 'Publication'
+        JOIN kg_edges e ON e.source = r.paper_id
+        JOIN matched_concepts m ON m.id = e.target
+        ORDER BY r.terms_matched DESC, r.score DESC, n.id;
     """
 
     conn = psycopg2.connect(connection_string)
@@ -184,7 +201,9 @@ def search_documents_via_graph(user_query: str):
         with conn.cursor() as cur:
             #https://neon.com/blog/understanding-vector-search-and-hnsw-index-with-pgvector
             cur.execute("SET hnsw.ef_search = 100;")
-            cur.execute(sql_query, (query_vector,))
+            # Keep scanning the index until the label filter yields enough rows (pgvector >= 0.8)
+            cur.execute("SET hnsw.iterative_scan = relaxed_order; SET hnsw.max_scan_tuples = 200000;")
+            cur.execute(sql_query, (*vectors, MIN_CONCEPT_SIMILARITY))
             results = cur.fetchall()
     finally:
         conn.close()
@@ -197,7 +216,7 @@ def search_documents_via_graph(user_query: str):
     for row in results:
         (paper_id, paper_title, paper_properties,
          concept_id, matched_concept, concept_type, concept_properties,
-         source, target, relation, edge_properties) = row
+         source, target, relation, edge_properties, _terms_matched, _score) = row
         if paper_id not in node_ids:
             nodes.append(Node(id=paper_id, label=paper_title, type="Publication", properties=paper_properties,widthConstraint={"maximum": 200}))
             node_ids.add(paper_id)
@@ -260,7 +279,8 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
     """Keep the first hop and add up to 5 distinct publication titles.
 
     Papers are ranked by exact shared concepts first (100% match), then by
-    concepts that are semantically similar to the paper's concepts.
+    concepts that are semantically similar to the paper's concepts. Only papers
+    with a real edge to the first hop are shown, so none is left disconnected.
     """
 
     # 1. First hop: reuse the one-hop lookup (paper + all directly connected nodes).
@@ -370,12 +390,22 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
     finally:
         conn.close()
 
-    # 4. Add the new papers and edges, skipping anything already in the graph.
+    # 4. Keep only the papers with a real edge to the first hop. A paper matched only through a
+    # similar concept has no such edge, so it is left out instead of being shown disconnected.
+    first_hop = set(first_hop_ids)
+    linked_ids = set()
+    for src_id, _, _, tgt_id, *_ in results:
+        if src_id in related_ids and tgt_id in first_hop:
+            linked_ids.add(src_id)
+        if tgt_id in related_ids and src_id in first_hop:
+            linked_ids.add(tgt_id)
+    dropped_ids = set(related_ids) - linked_ids
+    related = [row for row in related if row[0] in linked_ids]
+
+    # 5. Add the new papers and edges, skipping anything already in the graph.
     node_ids = set(first_hop_ids)
     edge_keys = {(e.source, e.to, e.label) for e in edges}
 
-    # Papers matched only through similar concepts have no edge to the current graph,
-    # so they are added directly (shown unconnected but related).
     for paper_id, paper_title, paper_properties in related:
         nodes.append(Node(id=paper_id, label=paper_title, type="Publication", properties=paper_properties,widthConstraint={"maximum": 200}))
         node_ids.add(paper_id)
@@ -383,6 +413,8 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
     for row in results:
         (src_id, src_name, src_label, tgt_id, tgt_name, tgt_label,
          relation, src_properties, tgt_properties) = row
+        if src_id in dropped_ids or tgt_id in dropped_ids:
+            continue
         if src_id not in node_ids:
             nodes.append(Node(id=src_id, label=src_name, type=src_label, properties=src_properties,widthConstraint={"maximum": 200}))
             node_ids.add(src_id)
