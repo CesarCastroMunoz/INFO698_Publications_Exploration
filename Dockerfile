@@ -6,9 +6,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR /app
 
 # Cache dependency installation separately from application code changes.
-# This command resolves pyproject.toml dependencies; it does not use uv.lock.
-COPY pyproject.toml uv.lock* ./
-RUN uv pip install --system -r pyproject.toml
+# Install the locked runtime dependencies without development tools.
+COPY pyproject.toml uv.lock ./
+RUN uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+    && uv pip install --system -r requirements.txt
 
 # Copy application code only; supply secrets through runtime environment variables.
 COPY src/ /app/src/

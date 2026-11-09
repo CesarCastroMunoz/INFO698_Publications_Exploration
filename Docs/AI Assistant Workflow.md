@@ -133,16 +133,17 @@ the cited abstract supports the answer or validate every generated citation.
 
 ## Setup and execution
 
-Use the project's Python 3.12 environment and dependencies. This module also
-requires `langgraph`, which is currently not declared in
-[pyproject.toml](../pyproject.toml). An environment-only installation is:
+Use the project's Python 3.12 environment. LangGraph is declared in
+[pyproject.toml](../pyproject.toml) and locked in [uv.lock](../uv.lock).
+Install the project's locked dependencies:
 
 ```powershell
-uv pip install --python .venv\Scripts\python.exe langgraph
+uv sync --locked
 ```
 
-This does not update dependency manifests or the lockfile. A later environment
-sync may remove the unlisted dependency.
+The [Dockerfile](../Dockerfile) exports the locked runtime dependencies and
+installs them into the container, including LangGraph. Development dependencies
+are excluded.
 
 Configure these values in the repository-root `prod.env`:
 
