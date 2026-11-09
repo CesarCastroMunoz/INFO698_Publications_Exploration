@@ -3,7 +3,7 @@
 > **Citation:** This document was created with the assistance of GitHub Copilot
 > (GitHub, 2026), an AI programming assistant. https://github.com/features/copilot
 
-This guide explains [transform_clean.py](transform_clean.py), the shared utility
+This guide explains [transform_clean.py](../src/data_pipeline/transform_clean.py), the shared utility
 used by the three publication search scripts. It describes the current code,
 not a proposed architecture.
 
@@ -478,4 +478,4 @@ illustrates the utility without making network requests.
 - UUID batch names do not indicate source, topic, or retrieval order.
 - The module stores no API continuation checkpoints.
 
-For the full retrieval workflow, see [README.md](README.md).
+For the full retrieval workflow, see [README.md](../README.md).

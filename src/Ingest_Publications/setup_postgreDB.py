@@ -69,9 +69,9 @@ def create_table():
                 """)
                 print("Table 'publications' ensured.")
 
-                #Create Index:
+                # Create the index in the current transaction.
                 cursor.execute("""
-                    CREATE INDEX CONCURRENTLY idx_publications_embedding_cosine
+                    CREATE INDEX IF NOT EXISTS idx_publications_embedding_cosine
                     ON public.publications
                     USING hnsw (embedding vector_cosine_ops)""")                                
                 print("Index 'idx_publications_embedding_cosine' ensured.")
@@ -154,14 +154,14 @@ if __name__ == "__main__":
     test_connection()
     
     # -- Setup Vector DB --
-    #enable_extensions()
+    enable_extensions()
     #drop_table("publications")  # if we want to recreate the table
-    #create_table()
+    create_table()
 
     # -- Setup Knowledge Graph Tables --
     # Drop existing tables to start fresh
-    drop_table("kg_edges") 
-    drop_table("kg_nodes") 
+    #drop_table("kg_edges")
+    #drop_table("kg_nodes")
     
     create_node_table()
     create_edge_table()

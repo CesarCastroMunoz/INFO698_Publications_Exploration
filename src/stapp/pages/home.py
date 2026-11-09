@@ -22,8 +22,8 @@ class PublicationHomePage:
         min_date = df_date_dist["min_date"].iloc[0] if not df_date_dist.empty else None
 
         st.caption(
-            "Discover academic literature through semantic search "
-            "and connected research concepts."
+            "Discover hidden connections in research. An AI-powered platform to explore, "
+            "visualize, and synthesize literature across AI, Data Science and healthcare."
         )
 
         details_column, chart_column = st.columns([1, 1], gap="large")
@@ -113,7 +113,7 @@ class PublicationHomePage:
             st.markdown(f"Using the method **{str(row['method']).title()}**")
             
             if st.button("Search", on_click=select_example, args=(str(row["paper_title"]).title(),)):
-                st.switch_page("pages/publication_search.py")
+                st.switch_page("pages/LSearch.py")
 
 
 PublicationHomePage()

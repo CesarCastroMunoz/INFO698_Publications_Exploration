@@ -54,7 +54,8 @@ class GraphExplorer:
                 st.subheader(paper.label)
             graph_column, abstract_column = st.columns([2, 1])
             with graph_column:
-                clicked_paper = graph_utilities.draw_graph(self.nodes, self.edges)
+                with st.container(border=True):
+                    clicked_paper = graph_utilities.draw_graph(self.nodes, self.edges)
                 selected_paper = next(
                     (node for node in self.nodes if node.id == clicked_paper), None
                 )
@@ -66,21 +67,32 @@ class GraphExplorer:
                     st.session_state["explored_paper_id"] = clicked_paper
                     st.rerun()
             with abstract_column:
-                st.subheader("Abstract")
-                properties = (paper.properties or {}) if paper is not None else {}
-                doi = properties.get("doi")
-                url = properties.get("url")
-                if isinstance(doi, str) and doi.strip():
-                    doi = doi.strip()
-                    doi_url = doi if doi.startswith(("https://", "http://")) else f"https://doi.org/{doi}"
-                    st.link_button("Open DOI", doi_url)
-                elif isinstance(url, str) and url.strip():
-                    st.link_button("Open paper", url.strip())
-                if abstract and abstract.strip():
-                    st.write(abstract)
-                else:
-                    st.write("No abstract available.")
-                    st.info("No abstract available for this paper.")
+                with st.form("abstract_form"):
+                    st.subheader("Abstract")
+                    properties = (paper.properties or {}) if paper is not None else {}
+                    author_ids = {
+                        edge.source for edge in self.edges
+                        if edge.label == "AUTHORED" and edge.to == target_paper_id
+                    }
+                    authors = [
+                        node.label for node in self.nodes
+                        if node.type == "Author" and node.id in author_ids
+                    ]
+                    st.markdown("**Authors:** " + ("; ".join(authors) or "Not available"))
+                    st.markdown(f"**Publication date:** {properties.get('publication_date') or 'Not available'}")
+                    doi = properties.get("doi")
+                    url = properties.get("url")
+                    if isinstance(doi, str) and doi.strip():
+                        doi = doi.strip()
+                        doi_url = doi if doi.startswith(("https://", "http://")) else f"https://doi.org/{doi}"
+                        st.link_button("Open DOI", doi_url)
+                    elif isinstance(url, str) and url.strip():
+                        st.link_button("Open paper", url.strip())
+                    if abstract and abstract.strip():
+                        st.write(abstract)
+                    else:
+                        st.write("No abstract available.")
+                        st.info("No abstract available for this paper.")
 
     def render(self, ref_filter=True):
         st.title("Publications Explorer")
@@ -111,7 +123,8 @@ class GraphExplorer:
                 st.info("Enter a medical condition, a method, or both to display their relationships.")
         else:        
             st.write("Click on a publication node to explore it")
-            clicked_node = graph_utilities.draw_graph(self.nodes, self.edges)
+            with st.container(border=True):
+                clicked_node = graph_utilities.draw_graph(self.nodes, self.edges)
 
             if clicked_node:
                 selected_node = next(

@@ -31,6 +31,13 @@ Publication JSONL -> Local OR OpenAI extraction -> Graph JSONL
 
 ## Running
 
+The main Streamlit application exposes **Home**, **Search**, **Explorer**, and
+**AI Assistant** pages. Search and Explorer are implemented in
+[`LSearch.py`](../src/stapp/pages/LSearch.py) and
+[`Explorer.py`](../src/stapp/pages/Explorer.py); AI Assistant is currently a
+placeholder. This application is separate from the ingestion interface described
+below.
+
 Change only `USE_LOCAL` near the top of the extraction script:
 `True` selects local Gemma 4; `False` selects OpenAI.
 The model and endpoint are selected automatically.

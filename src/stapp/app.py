@@ -27,9 +27,9 @@ st.set_page_config(
 
 pages = [
     st.Page(pages_dir / "home.py", title="Home", default=True),
-    st.Page(pages_dir / "publication_search.py", title="Search"),
-    st.Page(pages_dir / "graph_explorer.py", title="Explorer"),
-    st.Page(pages_dir / "Deep_Dive.py", title="Deep Dive"),    
+    st.Page(pages_dir / "LSearch.py", title="Search"),
+    st.Page(pages_dir / "Explorer.py", title="Explorer"),
+    st.Page(pages_dir / "AI_explorer.py", title="AI Assistant"),    
 ]
 
 navigation = st.navigation(pages)
@@ -68,8 +68,9 @@ with st.sidebar:
         </style>
         <div class="sidebar-footer">
             <strong>University of Arizona</strong><br>
-            <strong>Developed by:</strong> C. Castro<br>
-            <strong>Course:</strong> INFO 698 Capstone        
+            <strong>Developed by:</strong> Cesar Castro<br>
+            <strong>Course:</strong> INFO 698 Capstone<br>
+            <strong>Revision:</strong> Nov. 2026
         </div>
         """,
         unsafe_allow_html=True,

@@ -4,7 +4,7 @@
 
 **Project:** Interactive Semantic Exploration of Academic Literature
 
-**Implementation reviewed:** November 5, 2026
+**Implementation reviewed:** November 9, 2026
 
 **Scope:** OpenAlex and Semantic Scholar retrieval; metadata normalization; publication-vector ingestion; local graph extraction; graph embedding, archiving, and database loading; downstream retrieval and visualization.
 
@@ -25,6 +25,11 @@ The pipeline is a discovery and analysis infrastructure, not an automated system
 
 | Responsibility | Implementation |
 |---|---|
+| Main application navigation | [app.py](../src/stapp/app.py) |
+| Home dashboard and publication example | [home.py](../src/stapp/pages/home.py) |
+| Semantic publication search interface | [LSearch.py](../src/stapp/pages/LSearch.py) |
+| Concept search and graph exploration interface | [Explorer.py](../src/stapp/pages/Explorer.py) |
+| AI Assistant page (placeholder) | [AI_explorer.py](../src/stapp/pages/AI_explorer.py) |
 | Operator interface and stage selection | [data_pipeline_ui.py](../src/Ingest_Publications/data_pipeline_ui.py) |
 | OpenAlex retrieval and field mapping | [search_openalex.py](../src/data_pipeline/search_openalex.py) |
 | Semantic Scholar retrieval and field mapping | [search_sem_scholar.py](../src/data_pipeline/search_sem_scholar.py) |
@@ -35,9 +40,9 @@ The pipeline is a discovery and analysis infrastructure, not an automated system
 | Graph validation, vector reuse, archiving, and loading | [embed_load_graphs.py](../src/Ingest_Publications/embed_load_graphs.py) |
 | PostgreSQL schema and index setup | [setup_postgreDB.py](../src/Ingest_Publications/setup_postgreDB.py) |
 | Application retrieval queries | [st_utilities.py](../src/stapp/st_utilities.py) |
-| Interactive graph presentation | [graph_explorer.py](../src/stapp/pages/graph_explorer.py) |
+| Graph rendering, duplicate merging, and graph caching | [graph_utilities.py](../src/stapp/graph_utilities.py) |
 
-The Streamlit interface selects the GLiNER extractor. The alternative extractor remains in the repository and supplies vocabulary constants imported by the graph loader; its presence does not mean that it executes during the active pipeline.
+The separate ingestion interface selects the GLiNER extractor. The alternative extractor remains in the repository and supplies vocabulary constants imported by the graph loader; its presence does not mean that it executes during the active pipeline.
 
 ## 2. End-to-End Architecture
 
@@ -540,7 +545,9 @@ Methodological qualifications:
 
 ### 10.5 Visualization and links
 
-The graph page caches one-hop and related-paper results for five minutes per paper. Reference nodes can be hidden along with their incident edges. Clicking a publication updates the detail graph, title, abstract, and available external link using session state.
+The **Explorer** page caches related-paper graph results for five minutes per paper. Reference nodes can be hidden along with their incident edges. Clicking a publication opens its relationship view with author names, publication date, abstract, and an available DOI or URL link.
+
+The **Search** page performs publication-vector semantic search, optionally filters to records with abstracts, and displays selected-publication details alongside its graph. The **Home** page shows collection counts, the available date range, and a publication example that can be sent to Search. The **AI Assistant** page is currently a placeholder, not a working assistant feature.
 
 DOI and URL are read from publication-node properties. A missing DOI is not repaired by graph traversal; link availability depends on ingested metadata. Large graphs can remain expensive to serialize and lay out even when the database query is fast.
 
@@ -556,6 +563,8 @@ DOI and URL are read from publication-node properties. A missing DOI is not repa
 | Optional dependency group `extraction` | GLiNER local extraction dependencies |
 
 The adapters load `prod.env` relative to the working directory. Database and embedding modules generally resolve it from the repository root relative to their file paths. Deployment environments may supply variables directly.
+
+The repository includes [.env.example](../.env.example) with placeholder names; copy it to `prod.env` and fill in local credentials. The example is not a source of real keys.
 
 Credentials must not be included in documentation, exported research datasets, screenshots, or version control. The local extractor processes abstracts locally, but publication embedding sends title/abstract text to OpenAI, and graph embedding sends concept names. This external processing should be disclosed in the research data-management methodology.
 

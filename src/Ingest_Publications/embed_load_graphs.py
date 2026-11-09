@@ -187,6 +187,9 @@ def load_batch(conn, client, graphs, *, ready_dir=None):
             ON CONFLICT (id) DO UPDATE SET
                 properties = kg_nodes.properties || EXCLUDED.properties,
                 embedding = COALESCE(EXCLUDED.embedding, kg_nodes.embedding)
+            -- Skip no-op updates: each one adds a dead row version and a stale HNSW entry
+            WHERE kg_nodes.properties IS DISTINCT FROM kg_nodes.properties || EXCLUDED.properties
+               OR (kg_nodes.embedding IS NULL AND EXCLUDED.embedding IS NOT NULL)
         """, [
             (node["id"], node["label"], node["name"], Json(node.get("properties", {})), node.get("embedding"))
             for node in nodes.values()
@@ -196,6 +199,7 @@ def load_batch(conn, client, graphs, *, ready_dir=None):
                 INSERT INTO kg_edges (source, target, relation, properties) VALUES %s
                 ON CONFLICT (source, target, relation) DO UPDATE SET
                     properties = kg_edges.properties || EXCLUDED.properties
+                WHERE kg_edges.properties IS DISTINCT FROM kg_edges.properties || EXCLUDED.properties
             """, [
                 (edge["source"], edge["target"], edge["relation"], Json(edge.get("properties", {})))
                 for edge in edges.values()
