@@ -30,7 +30,8 @@ The current navigation contains:
 - **Home** — collection counts, date range, and a publication example.
 - **Search** — semantic publication search and selected-publication details.
 - **Explorer** — concept-based graph search and publication relationship views.
-- **AI Assistant** — placeholder page; the feature is not implemented yet.
+- **AI Assistant** — literature chat with topic screening, follow-up questions,
+  abstract-grounded answers, and linked publication citations.
 
 ## Run publication ingestion
 
@@ -58,6 +59,8 @@ docker run --rm -p 8000:8000 --env-file prod.env info698-litexplore
 
 - [Installation Guide](Docs/Installation%20Guide.md) — step-by-step Windows
   setup for a new PC.
+- [AI Assistant Workflow](Docs/AI%20Assistant%20Workflow.md) — LangGraph flow
+  diagram, question handling, citations, setup, and limitations.
 - [Publication Data Pipeline](Docs/Publication%20Data%20Pipeline.md) — retrieval,
   normalization, ingestion, graph construction, database behavior, and evaluation
   limits.
