@@ -1,4 +1,11 @@
-"""Extract publication graphs with the selected model and save restartable JSONL."""
+"""Extract publication graphs with the selected model and save restartable JSONL.
+   Revision 1: Initial implementation. 10/25/2026
+
+   This module uses LLM calls to extract semantic graphs from publication metadata, including entities and their relations.
+   For larger quantity of documents, this method can be slow due to the reliance on LLM calls for each publication.
+
+   Dependencies for Gemma 4 include running local LM studio for model inference.
+"""
 
 import json
 import os
@@ -19,6 +26,7 @@ OUTPUT_DIR = Path(__file__).resolve().parents[1] / "graph_extracted"
 USE_LOCAL = False  # True = local Gemma 4; False = OpenAI
 MODEL = "google/gemma-4-12b-qat" if USE_LOCAL else "gpt-6-luna"
 
+# Define allowed node and edge types for the semantic graph.
 ALLOWED_NODES = [
     "Method", "Task", "Condition", "Data_Modality", "Metric",
     "Dataset", "Chemical_or_Drug",
@@ -31,6 +39,7 @@ ALLOWED_EDGES = [
 
 
 class ExtractedNode(BaseModel):
+    """Represents a node in the extracted semantic graph."""
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_]*$")
     label: Literal[
         "Method", "Task", "Condition", "Data_Modality", "Metric",
@@ -55,6 +64,7 @@ class ExtractedNode(BaseModel):
 
 
 class GraphExtraction(BaseModel):
+    """Represents the extracted semantic graph for a publication."""
     nodes: list[ExtractedNode] = Field(max_length=7)
 
 
@@ -68,6 +78,7 @@ def is_publication_edge(edge, paper_id, labels):
 
 
 def publication_id(publication):
+    """Construct a unique identifier for the publication based on its source and source_id."""
     return f"paper:{quote(publication['source'], safe='')}:{quote(publication['source_id'], safe='')}"
 
 

@@ -47,10 +47,14 @@ def semantic_scholar_search_topic(
     topic, year_range="2000-", max_results=1000, *, start_token: str | None = None, start_batch: int = 1
 ):
     """Search from a bulk pagination token; max_results targets new records in this run."""
+
+    # start_token is used to resume pagination from a specific point if needed.
     if start_token is not None and not start_token.strip():
         raise ValueError("start_token must not be empty")
     if start_batch < 1:
         raise ValueError("start_batch must be at least 1")
+
+    # Set up the target directory and load existing publication IDs to avoid duplicates.
     target_dir = OUTPUT_DIR
     existing_ids = get_existing_ids(target_dir)
     

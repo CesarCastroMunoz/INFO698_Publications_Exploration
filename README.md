@@ -5,6 +5,13 @@ of AI, data science, and healthcare. It collects publication metadata from
 OpenAlex and Semantic Scholar, supports semantic publication search, and builds
 a publication-centered knowledge graph for concept-based exploration.
 
+## Author
+
+- **Cesar Castro M.**
+- [LinkedIn](https://www.linkedin.com/in/cesargcm/)
+- University of Arizona, College of Information Science
+- Capstone Project — Fall 2026
+
 ## Requirements
 
 - Python 3.12
@@ -66,12 +73,8 @@ docker run --rm -p 8000:8000 --env-file prod.env info698-litexplore
   limits.
 - [Knowledge Graph Approach](Docs/Knowledge%20Graph%20Approach.md) — graph
   extraction, identifiers, relationships, and loading.
-- [GLiNER Quick Start](Docs/GLiNER%20Quick%20Start.md) — local extraction setup
-  and operational notes.
 - [GLiNER Extraction Pipeline](Docs/GLiNER%20Extraction%20Pipeline.md) — detailed
   extraction behavior and JSONL output.
-- [Transform and Clean Guide](Docs/transform_clean_guide.md) — shared publication
-  model and JSONL utilities.
 
 For environment variable details, see [.env.example](.env.example). Keep
 generated publication and graph data under `src/` separate from source code and

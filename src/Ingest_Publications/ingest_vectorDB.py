@@ -70,6 +70,7 @@ def ingest_publications(input_file, chunk_size=100):
                         with OpenAI(api_key=openai_api_key) as client:
                             result = client.embeddings.create(model=MODEL, input=texts, dimensions=DIMENSION)
                         embeddings = sorted(result.data, key=lambda item: item.index)
+                        # Ensure the number of embeddings matches the number of pending publications.
                         if len(embeddings) != len(pending):
                             raise ValueError("Embedding response does not match the requested records")
 
@@ -80,6 +81,7 @@ def ingest_publications(input_file, chunk_size=100):
                              pub["title"], pub["abstract"], pub.get("authors", []), item.embedding)
                             for pub, item in zip(pending, embeddings)
                         ]
+                        # Insert the prepared records into the database and fetch the inserted rows.
                         inserted = psycopg2.extras.execute_values(
                             cursor,
                             """INSERT INTO publications

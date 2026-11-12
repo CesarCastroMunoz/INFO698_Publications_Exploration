@@ -63,6 +63,8 @@ def openalex_search_topic(
     if start_batch < 1:
         raise ValueError("start_batch must be at least 1")
 
+    # Determine the target directory for saving publication data.
+    # This is a local directory where the publication data will be stored.
     target_dir = OUTPUT_DIR
 
     # Pre-load existing IDs from JSONL batches.
@@ -92,7 +94,7 @@ def openalex_search_topic(
         for page_num, page_results in enumerate(
             query.paginate(per_page=100, n_max=max_results, cursor=cursor), start=start_batch
         ):
-                        
+            # Process each page of results, converting them to Publication objects and adding them to the buffer.
             newly_saved = writer.add(
                 to_publication(result) for result in page_results
             )
@@ -117,12 +119,14 @@ if __name__=="__main__":
     #openalex_search_topic('"health care" AND "AI"')
     #openalex_search_topic('"health care" AND "Computer Vision"')
     
+    # Example health-related terms for the search query.
     # health_terms = (
     # '(healthcare OR "health care" OR medical OR clinical '
     # 'OR biomedical OR patient OR hospital '
     # 'OR "public health" OR "medical imaging" '
     # 'OR "electronic health records")'
     # )
+
 
     health_terms = (
     '(EHR OR EMR '

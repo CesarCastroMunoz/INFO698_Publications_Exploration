@@ -7,7 +7,11 @@ pages_dir = Path(__file__).parent / "pages"
 assets_dir = Path(__file__).parent / "assets"
 
 def render_banner(title):
-    """Small banner that fades from blue (left) to white (right)."""
+    """Small banner that fades from blue (left) to white (right).
+
+    Args:
+        title (str): The title to display in the banner.
+    """
     st.markdown(
         f"""
         <div style="background: linear-gradient(90deg, #1F4E79 0%, #1F4E79 45%, #FFFFFF 100%);
@@ -20,11 +24,14 @@ def render_banner(title):
         unsafe_allow_html=True,
     )
 
+# Set up the Streamlit page and render the banner at the top.
 st.set_page_config(
-    render_banner("Interactive Semantic Exploration of Academic Literature"),
+    page_title="Interactive Semantic Exploration of Academic Literature",
     layout="wide",
 )
+render_banner("Interactive Semantic Exploration of Academic Literature")
 
+# Define the pages for the Streamlit app and set up navigation.
 pages = [
     st.Page(pages_dir / "home.py", title="Home", default=True),
     st.Page(pages_dir / "LSearch.py", title="Search"),
@@ -32,10 +39,13 @@ pages = [
     st.Page(pages_dir / "AI_explorer.py", title="AI Assistant"),    
 ]
 
+# Set up the navigation for the Streamlit app.
 navigation = st.navigation(pages)
 
+# Display the app logo at the top of the sidebar.
 st.logo(str(assets_dir / "icon.svg"), size="large")
 
+# Customize the sidebar appearance and add a footer with app information.
 with st.sidebar:
     st.markdown(
         f"""

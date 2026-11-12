@@ -1,14 +1,23 @@
-import csv
+'''
+Publication search page for the academic literature exploration app.
+Feature 2. Semantic search for academic publications using only the vector DB.
+Revision 1: Initial Rev. Cesar C. 11/01/2026
+'''
 
+import csv
 import streamlit as st
 from psycopg2 import Error
-
 import graph_utilities
 import st_utilities
 
 
 class PublicationSearchPage:
+    '''Publication search page class for the academic literature exploration app.'''
+
     def run(self):
+        '''Render the publication search page.'''
+
+        # Display the page title and introductory text.
         st.title("Publication Search")
         st.write("Explore academic literature through an interactive semantic interface.")
 
@@ -30,7 +39,13 @@ class PublicationSearchPage:
         self.beautify_results()
 
     def process_input(self, concept, abstract=False):
-        '''Process the input concept and perform a search for publications.'''
+        '''Process the input concept and perform a search for publications.
+        Args:
+            concept (str): The concept to search for.
+            abstract (bool): Whether to restrict the search to articles with an abstract.
+        Returns:
+            None
+        '''
         if not concept.strip():
             st.warning("Enter a concept to search.")
             return
@@ -40,6 +55,12 @@ class PublicationSearchPage:
         st.session_state.pop("search_paper_id", None)
 
     def title_preserve_acronyms(self, text):
+        '''Capitalize words in the text while preserving acronyms.
+        Args:
+            text (str): The text to capitalize.
+        Returns:
+            str: The capitalized text with acronyms preserved.
+        '''
         import re
         return re.sub(
             r"[A-Za-z]+('[A-Za-z]+)?",
@@ -48,7 +69,12 @@ class PublicationSearchPage:
         )
 
     def beautify_results(self):
-        '''Display the search results in a user-friendly format.'''
+        '''Display the search results in a user-friendly format.
+        Returns:
+            None
+        '''
+
+        # Check if there are any publications in the session state.
         publications = st.session_state.get("publications")
         if publications is None:
             return
@@ -56,17 +82,22 @@ class PublicationSearchPage:
             st.info("No publications found.")
             return
 
+        # Generate the list of paper IDs corresponding to the search results.
         paper_ids = [
             graph_utilities.kg_paper_id(source, source_id)
             for source, source_id in zip(publications["source"], publications["source_id"])
         ]
 
         def select_publication(paper_id):
+            '''Select a publication and store its ID in the session state.'''
             st.session_state["search_paper_id"] = paper_id
 
+        # Display the publication selection interface.
         st.subheader("Select a Publication")
         selected_id = st.session_state.get("search_paper_id")
         selection_columns = st.columns(2, gap="small")
+
+        # Calculate the midpoint to split the publications into two columns.
         midpoint = (len(publications) + 1) // 2
         for column, rows in zip(
             selection_columns,
@@ -84,22 +115,28 @@ class PublicationSearchPage:
                     )
 
         st.divider()
+
+        # If no publication is selected, prompt the user to select one.
         if selected_id is None:
             st.info("Select a publication to view its details.")
             return
 
+        # Load the graph for the selected publication.
         try:
             nodes, edges = graph_utilities.load_paper_graph(selected_id)
         except Error:
             st.error("Unable to load the graph from the database. Please try again.")
             return
 
+        # Retrieve the search result or graph publication details for the selected paper.
         result = self.get_result(publications, paper_ids, selected_id, nodes, edges)
         if result is None:
             st.info("No information found for this publication.")
             return
         st.subheader(result["title"])
         graph_column, details_column = st.columns(2)
+
+        # Create two columns: one for the graph and one for the publication details.
         with graph_column:
             if not nodes:
                 st.info("No graph available for this publication.")
@@ -114,7 +151,18 @@ class PublicationSearchPage:
             self.show_details(result)
 
     def get_result(self, publications, paper_ids, paper_id, nodes, edges):
-        '''Return the search result row, or graph publication details with connected authors.'''
+        '''Return the search result row, or graph publication details with connected authors.
+
+        Args:
+            publications (DataFrame): The search results DataFrame.
+            paper_ids (list): The list of paper IDs corresponding to the search results.
+            paper_id (str): The ID of the paper to retrieve.
+            nodes (list): The list of graph nodes.
+            edges (list): The list of graph edges.
+
+        Returns:
+            dict or Series: The search result row or graph publication details.
+        '''
         if paper_id in paper_ids:
             return publications.iloc[paper_ids.index(paper_id)].dropna()
         paper = next((node for node in nodes if node.id == paper_id), None)
@@ -128,12 +176,19 @@ class PublicationSearchPage:
         return {**(paper.properties or {}), "title": paper.label, "authors": authors}
 
     def show_details(self, result):
-        '''Display the authors, links, abstract and references of the selected publication.'''
+        '''Display the authors, links, abstract and references of the selected publication.
+
+        Args:
+            result (dict or Series): The search result row or graph publication details.
+        Returns:
+            None
+        '''
 
         with st.form("publication_details"):
 
             authors = result.get("authors") or []
 
+            # Ensure authors is a list of author names.
             if isinstance(authors, str):
                 authors = authors.strip()
                 if authors.startswith("{") and authors.endswith("}"):
@@ -147,6 +202,8 @@ class PublicationSearchPage:
                 ("Source ID", "source_id"),
             ):
                 details.append(f"**{label}:** {result.get(field) or 'Not available'}")
+
+            # Check if the DOI is available and valid.
             doi = result.get("doi")
             if not isinstance(doi, str) or not doi.strip():
                 details.append("**DOI:** Not available")
@@ -161,6 +218,8 @@ class PublicationSearchPage:
                     url_column.link_button("Publication website", url)
             st.markdown("#### Abstract")
             st.write(result.get("abstract") or "No abstract available.")
+
+            # Display the references if available. - Decided to remove the expander for simplicity.
             # with st.expander("References"):
             #     st.write(result.get("references") or "No references available.")
 

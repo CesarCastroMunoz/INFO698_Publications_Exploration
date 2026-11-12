@@ -1,5 +1,6 @@
 '''
 Graph helpers shared by the Streamlit pages (Explorer and Publication Search).
+Revision 1: Initial Rev. Cesar C. 11/05/2026
 '''
 
 from urllib.parse import quote
@@ -30,18 +31,41 @@ NAME_MERGE_THRESHOLD = 90
 
 
 def kg_paper_id(source, source_id):
-    '''Knowledge graph node id of a publication (same format used when the graph is loaded).'''
+    '''Knowledge graph node id of a publication (same format used when the graph is loaded).
+
+    Args:
+        source (str): The source of the publication (e.g., journal name).
+        source_id (str): The unique identifier of the publication within the source.
+
+    Returns:
+        str: The knowledge graph node id for the publication.
+    '''
     return f"paper:{quote(source, safe='')}:{quote(source_id, safe='')}"
 
 
 @st.cache_data(ttl=300)
 def load_two_hops(target_paper_id: str):
-    """Cache two-hop graph results for five minutes per paper."""
+    """Cache two-hop graph results for five minutes per paper.
+
+    Args:
+        target_paper_id (str): The knowledge graph node id of the target paper.
+
+    Returns:
+        tuple: A tuple containing the nodes and edges around the target paper.
+    """
     return st_utilities.get_two_hops(target_paper_id)
 
 
 def remove_references(nodes, edges):
-    '''Drop Reference nodes and any edge that touches them.'''
+    '''Drop Reference nodes and any edge that touches them.
+
+    Args:
+        nodes (list): The list of graph nodes.
+        edges (list): The list of graph edges.
+
+    Returns:
+        tuple: A tuple containing the filtered nodes and edges.
+    '''
     nodes = [node for node in nodes if node.type != "Reference"]
     node_ids = {node.id for node in nodes}
     edges = [edge for edge in edges if edge.source in node_ids and edge.to in node_ids]
@@ -49,7 +73,15 @@ def remove_references(nodes, edges):
 
 
 def load_paper_graph(target_paper_id: str, ref_filter=True):
-    '''Return (nodes, edges) around a paper. Raises psycopg2.Error if the database fails.'''
+    '''Return (nodes, edges) around a paper. Raises psycopg2.Error if the database fails.
+
+    Args:
+        target_paper_id (str): The knowledge graph node id of the target paper.
+        ref_filter (bool): Whether to remove reference nodes and their edges.
+
+    Returns:
+        tuple: A tuple containing the nodes and edges around the target paper.
+    '''
     nodes, edges = load_two_hops(target_paper_id)
     if ref_filter:
         nodes, edges = remove_references(nodes, edges)
@@ -58,7 +90,16 @@ def load_paper_graph(target_paper_id: str, ref_filter=True):
 
 def merge_duplicates(nodes, edges, threshold=NAME_MERGE_THRESHOLD):
     '''Merge concept nodes with similar names into the first one (its name is kept) and redirect their edges.
-    Publications are not fuzzy matched: they only merge when the titles are identical.'''
+    Publications are not fuzzy matched: they only merge when the titles are identical.
+
+    Args:
+        nodes (list): The list of graph nodes.
+        edges (list): The list of graph edges.
+        threshold (int): The fuzzy matching threshold for concept names.
+
+    Returns:
+        tuple: A tuple containing the merged nodes and edges.
+    '''
     papers = {}
     concepts = {}
     new_id = {}
@@ -85,7 +126,15 @@ def merge_duplicates(nodes, edges, threshold=NAME_MERGE_THRESHOLD):
 
 
 def draw_graph(nodes, edges):
-    '''Merge duplicate nodes, color the nodes by type, draw the graph and return the id of the clicked node.'''
+    '''Merge duplicate nodes, color the nodes by type, draw the graph and return the id of the clicked node.
+
+    Args:
+        nodes (list): The list of graph nodes.
+        edges (list): The list of graph edges.
+
+    Returns:
+        str: The id of the clicked node in the graph.
+    '''
     nodes, edges = merge_duplicates(nodes, edges)
     config = Config(
         width="100%",

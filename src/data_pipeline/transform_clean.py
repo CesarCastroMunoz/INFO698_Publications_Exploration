@@ -1,6 +1,7 @@
 '''
 Utilities for publication cleaning, JSONL batches, and optional Markdown export.
 Revision 1: Initial Rev. Cesar C. 10/14/2026
+Revision 1.1: Added DOI cleaning and improved author ID handling. Cesar C. 10/15/2026
 '''
 
 import json
@@ -12,6 +13,7 @@ from typing import Iterable, Iterator, Literal, TypeVar
 from urllib.parse import quote
 from uuid import uuid4
 
+# Define the source types and output directory for publication data.
 Source = Literal["arxiv", "openalex", "semantic_scholar"]
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "publications"
 T = TypeVar("T")
@@ -23,14 +25,16 @@ def clean_text(text: str | None) -> str:
 
 
 def slugify(text: str) -> str:
-    '''Remove special characters and limit title to 50 characters for Filename'''
+    '''Remove special characters and limit title to 50 characters only for Filename'''
     text = re.sub(r"[^\w\s-]", "", clean_text(text).lower())
     return re.sub(r"[-\s]+", "_", text).strip("_")[:50] or "untitled"
 
 
 @dataclass
 class Publication:
-    """Source-neutral metadata; unknown values stay None, not placeholder text."""
+    """Source-neutral metadata; unknown values stay None, not placeholder text.
+       Object representing a single publication with cleaned and structured metadata.
+    """
 
     source: Source
     source_id: str
@@ -60,21 +64,27 @@ class Publication:
             for author, author_id in zip(self.authors, ids)
             if (name := clean_text(author))
         ]
+        # Update the authors and author_ids lists to only include valid entries.
         self.authors = [name for name, _ in pairs]
         self.author_ids = [author_id for _, author_id in pairs]
         self.references = [ref for ref in map(clean_text, self.references) if ref]
+
+        # Clean and normalize the abstract, publication date, and publication type fields.
         self.abstract = clean_text(self.abstract) or None
+
+        # Clean and normalize the publication date and type fields.
         self.publication_date = clean_text(self.publication_date) or None
         self.publication_type = clean_text(self.publication_type) or None
         if self.publication_year is None and self.publication_date:
             self.publication_year = int(self.publication_date[:4])
+
         doi = clean_text(self.doi)
         #Clean DOI to be use to find if same paper found in different sources
         doi = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", "", doi, flags=re.I)
         self.doi = doi.lower() or None
         self.url = clean_text(self.url) or None
 
-# Keep option for Markdown Output. 
+# Keep option for Markdown Output. If corpus is small OKF might be a good choice.
 def format_markdown(publication: Publication) -> str:
     """JSON-encoded metadata values are also valid YAML values."""
     metadata = asdict(publication)
@@ -103,6 +113,8 @@ def read_jsonl(batch_path: str | Path) -> Iterator[Publication]:
 def get_existing_ids(output_dir: str | Path) -> set[tuple[str, str]]:
     """Read source/ID pairs from saved JSONL batches."""
     existing_ids: set[tuple[str, str]] = set()
+
+    # Iterate over all JSONL files in the output directory to collect existing publication IDs.
     for path in Path(output_dir).glob("*.jsonl"):
         for publication in read_jsonl(path):
             existing_ids.add((publication.source, publication.source_id))

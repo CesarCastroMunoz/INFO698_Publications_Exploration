@@ -1,4 +1,12 @@
-"""Extract publication graphs locally with GLiNER2.5 Small on CPU."""
+"""Extract publication graphs locally with GLiNER2.5 Small on CPU.
+   Revision 1: Initial implementation. Cesar C. 10/25/2026
+
+   This module uses GLiNER2.5 Small to extract semantic graphs from publication metadata, including entities and their relations.
+   The extraction is performed locally on CPU and is suitable for smaller-scale processing due to computational constraints.
+
+   Fastino AI. (n.d.). GLiNER2.5 span attributes tutorial.
+   GitHub. https://github.com/fastino-ai/GLiNER2/blob/main/tutorial/13-span_attributes.md
+"""
 
 import json
 from pathlib import Path
@@ -9,10 +17,11 @@ INPUT_DIR = Path(__file__).resolve().parents[1] / "publications"
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "graph_extracted"
 
 MODEL = "fastino/gliner2.5-small-v1"
-ENTITY_THRESHOLD = 0.5
-RELATION_THRESHOLD = 0.75
-MAX_ENTITIES = 7
+ENTITY_THRESHOLD = 0.5 # Threshold for entity extraction confidence
+RELATION_THRESHOLD = 0.75  # Threshold for relation extraction confidence
+MAX_ENTITIES = 7 # Maximum number of entities to extract per publication
 
+# Define entity types and allowed nodes/edges for the semantic graph.
 ENTITY_TYPES = {
     "Method": "Machine learning algorithms, model architectures, statistical and analytical methods",
     "Task": "Research tasks such as image segmentation, diagnosis, prediction or classification",
@@ -25,6 +34,8 @@ ENTITY_TYPES = {
     "Symptom": "Symptoms or clinical signs",
 }
 ALLOWED_NODES = list(ENTITY_TYPES)
+
+# Define allowed edges for the semantic graph.
 ALLOWED_EDGES = [
     "USES_METHOD", "ADDRESSES_TASK", "STUDIES_CONDITION", "EVALUATED_ON",
     "TRAINED_WITH", "MEASURED_BY", "MENTIONS",
@@ -40,6 +51,7 @@ PUBLICATION_ROLES = {
 
 
 def load_model():
+    """Load the GLiNER model and create the schema for entity extraction."""
     from gliner2 import AutoExtractor, AttributeGroup
 
     print(f"Loading {MODEL} on CPU (first run downloads the model)...", flush=True)
@@ -57,11 +69,12 @@ def load_model():
 
 
 def publication_id(publication):
+    """Construct a unique identifier for the publication based on its source and source_id."""
     return f"paper:{quote(publication['source'], safe='')}:{quote(publication['source_id'], safe='')}"
 
 
 def extract_graph(model, publication, schema):
-    """Keep metadata deterministic; predict entity spans and their publication roles."""
+    """Keep metadata deterministic; predict entity spans and their publication roles for the given publication."""
 
     # Validate required publication fields and their types.
     for key in ("source", "source_id", "title"):
@@ -90,6 +103,8 @@ def extract_graph(model, publication, schema):
     }
     edges = []
     author_ids = publication.get("author_ids") or []
+
+    # Process authors and create corresponding nodes and edges.
     for index, name in enumerate(publication.get("authors") or []):
         provider_id = author_ids[index] if index < len(author_ids) else None
         author_id = (
@@ -98,6 +113,8 @@ def extract_graph(model, publication, schema):
         )
         nodes[author_id] = {"id": author_id, "label": "Author", "name": name, "properties": {}}
         edges.append({"source": author_id, "target": paper_id, "relation": "AUTHORED", "properties": {}})
+
+    # Process references and create corresponding nodes and edges.
     for index, reference in enumerate(publication.get("references") or []):
         reference_id = f"{paper_id}:reference:{index}"
         nodes[reference_id] = {
@@ -122,6 +139,8 @@ def extract_graph(model, publication, schema):
             for label, matches in result["entities"].items()
             for entity in matches
         ]
+        # Sort entities by label and confidence to prioritize more relevant entities.
+        # Keep Medical_Condition entities at the top of the list for priority processing.
         entities.sort(key=lambda item: (
             item[0] != "Medical_Condition", -item[1]["confidence"],
         ))
@@ -129,19 +148,31 @@ def extract_graph(model, publication, schema):
 
         # Iterate over the sorted entities and construct nodes and edges based on their labels and roles.
         for label, entity in entities:
+
+            # Skip entities that are not allowed in the semantic graph.
             if label not in ALLOWED_NODES:
                 raise ValueError(f"Unknown entity label: {label}")
+
+            # Validate the entity text against the source span and ensure it is not empty.
             if text[entity["start"]:entity["end"]] != entity["text"] or not entity["text"].strip():
                 raise ValueError(f"Entity is not a valid source span: {entity}")
+
+            # Skip entities that do not meet the confidence threshold.
             if entity["confidence"] < ENTITY_THRESHOLD:
                 continue
             name = " ".join(entity["text"].lower().split())
             node_id = f"{label.lower()}:{name}"
+
+            # Skip adding new nodes if the maximum number of entities has been reached.
             if node_id not in semantic_ids and len(semantic_ids) >= MAX_ENTITIES:
                 continue
+
+            # Add the node ID to the set of semantic IDs to track processed entities.
             semantic_ids.add(node_id)
             nodes[node_id] = {"id": node_id, "label": label, "name": name, "properties": {}}
             role = entity.get("publication_role", {})
+
+            # Determine the relation type and valid target labels based on the publication role.
             relation, valid_labels = PUBLICATION_ROLES.get(role.get("label"), ("MENTIONS", []))
             if role.get("confidence", 0) < RELATION_THRESHOLD or label not in valid_labels:
                 relation = "MENTIONS"
@@ -153,6 +184,8 @@ def extract_graph(model, publication, schema):
         edge["target"] for edge in edges
         if edge["source"] == paper_id and edge["relation"] != "MENTIONS"
     }
+
+    # Remove "MENTIONS" edges if the target is already involved in a more specific relation.
     edges = [edge for edge in edges if edge["relation"] != "MENTIONS" or edge["target"] not in specific_targets]
     unique_edges = {(edge["source"], edge["target"], edge["relation"]): edge for edge in edges}
     return {
@@ -163,9 +196,13 @@ def extract_graph(model, publication, schema):
 
 def read_completed(output_dir):
     """Scan successful output once on startup; refuse to append after a torn write."""
+
+    # Iterate through all output files to collect completed publication IDs.
     completed = set()
     files = sorted(output_dir.glob("graph_publications-*.jsonl"))
     last_count = 0
+
+    # Process each output file to identify completed publications.
     for path in files:
         last_count = 0
         with path.open("rb") as file:
@@ -205,6 +242,8 @@ def run(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR):
     model = schema = None
     for file_number, path in enumerate(input_files, 1):
         print(f"File {file_number}/{len(input_files)}: {path.name}", flush=True)
+
+        # Print progress for the current file before starting line-by-line processing.
         with path.open(encoding="utf-8") as file:
             for line_number, line in enumerate(file, 1):
                 if not line.strip():
@@ -243,6 +282,7 @@ def run(input_dir=INPUT_DIR, output_dir=OUTPUT_DIR):
                 # Close the complete record before marking the publication complete.
                 with target.open("a", encoding="utf-8", newline="\n") as output:
                     output.write(line + "\n")
+                # Mark the publication as completed to avoid reprocessing in future runs.
                 completed.add(paper_id)
                 saved += 1
                 count += 1

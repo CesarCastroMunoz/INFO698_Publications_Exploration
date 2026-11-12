@@ -1,3 +1,10 @@
+'''
+Graph explorer page for the academic literature exploration app.
+Feature 3. Graph exploration for academic publications. 2. One-hop and semantic search capabilities.
+Revision 1: Initial Rev. Cesar C. 11/02/2026
+'''
+
+
 import streamlit as st
 from psycopg2 import Error
 from streamlit_agraph import Node, Edge
@@ -5,6 +12,7 @@ import st_utilities
 import graph_utilities
 import math
 
+# Load and explore publication graphs with one-hop and semantic search capabilities.
 @st.cache_data(ttl=300)
 def load_one_hop(target_paper_id: str):
     """Load graph nodes with their stored properties."""
@@ -12,26 +20,59 @@ def load_one_hop(target_paper_id: str):
 
 
 class GraphExplorer:
+    '''Graph explorer class for the academic literature exploration app.'''
     def __init__(self):
         self.nodes = []
         self.edges = []
 
     def add_node(self, id, label):
+        '''Add a node to the graph.
+        Args:
+            id (str): The unique identifier of the node.
+            label (str): The label to display for the node.
+        Returns:
+            None
+        '''
         self.nodes.append(Node(id=id, label=label))
 
     def add_edge(self, source, target):
+        '''Add an edge to the graph.
+        Args:
+            source (str): The source node ID.
+            target (str): The target node ID.
+        Returns:
+            None
+        '''
         self.edges.append(Edge(source=source, target=target))
 
     def get_one_hop(self, target_paper_id: str):
+        '''Load the one-hop graph for the target paper.
+        Args:
+            target_paper_id (str): The ID of the target paper.
+        Returns:
+            None
+        '''
         self.nodes, self.edges = load_one_hop(target_paper_id)
 
     def semantic_search(self, condition: str, method: str):
-        '''Search the filled inputs together: papers related to both come first, then the others.'''
+        '''Perform a semantic search for papers related to the given condition and method.
+        Args:
+            condition (str): The condition to search for.
+            method (str): The method to search for.
+        Returns:
+            None
+        '''
         queries = [text for text in (condition, method) if text]
         self.nodes, self.edges = st_utilities.search_documents_via_graph(queries)
 
     def explore_one_paper(self, target_paper_id: str, ref_filter=True):
-        ''' After user click a paper trigger another graph display for that paper '''
+        ''' After user click a paper trigger another graph display for that paper
+        Args:
+            target_paper_id (str): The ID of the target paper.
+            ref_filter (bool): Whether to apply reference filtering.
+        Returns:
+            None
+        '''
         if target_paper_id:
             try:
                 #self.get_one_hop(target_paper_id)
@@ -40,18 +81,21 @@ class GraphExplorer:
                 st.error("Unable to load the graph from the database. Please try again.")
                 return
 
+        # Check if the graph has any nodes or edges to display.
         if not self.nodes and not self.edges:
             if target_paper_id:
                 st.info("No relationships found. The Paper ID may not exist or may have no connected nodes.")
             else:
                 st.info("Enter a Paper ID to display its relationships.")
         else:        
+            # Display the graph and abstract for the target paper.
             paper = next(
                 (node for node in self.nodes if node.id == target_paper_id), None
             )
             abstract = (paper.properties or {}).get("abstract") if paper is not None else None
             if paper is not None:
                 st.subheader(paper.label)
+            # Display the paper title as a subheader if available.
             graph_column, abstract_column = st.columns([2, 1])
             with graph_column:
                 with st.container(border=True):
@@ -95,6 +139,12 @@ class GraphExplorer:
                         st.info("No abstract available for this paper.")
 
     def render(self, ref_filter=True):
+        '''Render the publications explorer page.
+        Args:
+            ref_filter (bool): Whether to apply reference filtering when displaying the graph.
+        Returns:
+            None
+        '''
         st.title("Publications Explorer")
 
         with st.form("graph_search"):

@@ -166,28 +166,72 @@ The main app has Home, Search, Explorer, and AI Assistant pages. AI Assistant
 is currently a placeholder. Search and Explorer require both a reachable,
 populated database and a valid OpenAI API key.
 
-## Optional: Run the publication-ingestion interface
+## Step 7: Install and run publication ingestion and entity extraction
 
-The ingestion interface retrieves publications and processes them into the
-database. It is separate from the main exploration app and may incur OpenAI API
-charges during embedding. OpenAlex credentials are needed to search OpenAlex;
-Semantic Scholar API credentials are optional.
+The ingestion pipeline retrieves publications, extracts their entities and
+relationships into knowledge graphs, and loads the results into the database.
+GLiNER is the project's primary local entity extractor, so install its extra to
+run graph extraction. This step is required for the full ingestion and
+entity-extraction workflow, although it is not needed just to launch the main
+exploration app against an already populated database.
 
-Install the additional local GLiNER extraction dependency:
+From the repository root, install the GLiNER dependency:
 
 ```powershell
 uv sync --extra extraction --no-dev
 ```
 
-Then launch the ingestion interface:
+OpenAlex credentials are needed to search OpenAlex; Semantic Scholar API
+credentials are optional. Embedding and loading graphs uses the OpenAI API and
+may incur charges.
+
+To run the full ingestion interface:
 
 ```powershell
 uv run streamlit run src\Ingest_Publications\data_pipeline_ui.py
 ```
 
-The first graph-extraction run downloads the GLiNER model from Hugging Face and
-requires internet access. This can take time and use substantial disk space.
-The model download is not required just to run the main app.
+The interface has **Extract Graphs** selected by default and uses GLiNER for
+that step. To run extraction directly on JSONL files already in
+`src\publications`, use:
+
+```powershell
+uv run python src\Ingest_Publications\graph_extraction_gliner.py
+```
+
+GLiNER runs locally on CPU; graph extraction does not require an API key. The
+first extraction downloads model weights from Hugging Face, so it requires
+internet access and can take time and disk space. Embedding and database loading
+are separate steps and require `OPENAI_KEY` and `NEON_DATABASE_URL`.
+
+### Optional alternative: Use `graph_extraction.py`
+
+The separate `graph_extraction.py` script is an optional alternative extractor;
+it is not selected by the ingestion interface, which uses GLiNER. It can use
+OpenAI or a local model through LM Studio. In
+`src\Ingest_Publications\graph_extraction.py`, set `USE_LOCAL` near the top:
+
+- `USE_LOCAL = False` (default) uses OpenAI model `gpt-6-luna` and requires
+  `OPENAI_KEY` in `prod.env`.
+- `USE_LOCAL = True` uses `google/gemma-4-12b-qat` through LM Studio. Start the
+  LM Studio local server and load that model before running the script; the
+  expected endpoint is `http://127.0.0.1:1234/v1`.
+
+Run it from the repository root:
+
+```powershell
+uv run python src\Ingest_Publications\graph_extraction.py
+```
+
+It reads publication JSONL files from `src\publications` and writes unembedded
+graphs to `src\graph_extracted`. To embed and load those graphs, run:
+
+```powershell
+uv run python src\Ingest_Publications\embed_load_graphs.py
+```
+
+The loader requires `OPENAI_KEY` for embeddings and `NEON_DATABASE_URL` for the
+database, including when extraction used LM Studio.
 
 ## Optional: Run with Docker
 

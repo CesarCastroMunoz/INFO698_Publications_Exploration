@@ -2,6 +2,12 @@
 Utility functions and configurations for the Streamlit app.
 Handles environment loading, database connection, and OpenAI API setup.
 Revision 1: Initial Rev. Cesar C. 10/28/2026
+Revision 2: Added utility functions for publication search and summaries. Cesar C. 11/10/2026
+
+Neon. (n.d.). Understanding vector search and HNSW index with pgvector.
+https://neon.com/blog/understanding-vector-search-and-hnsw-index-with-pgvector
+
+OpenAI. (n.d.). Vector embeddings. https://developers.openai.com/api/docs/guides/embeddings
 '''
 
 import os
@@ -30,14 +36,30 @@ CONCEPTS_PER_QUERY = 5  # nearest concepts kept for each query
 
 
 def get_embedding(text):
-    '''Get the embedding for a given text using the OpenAI API.'''
+    '''Get the embedding for a given text using the OpenAI API.
+
+    Args:
+        text (str): The text to embed.
+
+    Returns:
+        list[float]: The embedding vector for the input text.
+    '''
     embedder = OpenAIEmbeddings(model=EMBEDDING_MODEL, openai_api_key=openai_api_key, dimensions=DIMENSION)
     return embedder.embed_query(text)
 
 
 def search_publications(prompt, top_k=10, abstract=False):
     '''Search for publications related to the given prompt using OpenAI embeddings.
-    https://help.openai.com/en/articles/6824809-embeddings-faq'''
+    https://help.openai.com/en/articles/6824809-embeddings-faq
+
+    Args:
+        prompt (str): The search query to find related publications.
+        top_k (int, optional): The number of top results to return. Defaults to 10.
+        abstract (bool, optional): Whether to only include publications with abstracts. Defaults to False.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the search results with publication details and distance.
+    '''
     embedding = get_embedding(prompt)
     conn = psycopg2.connect(connection_string)
     register_vector(conn.cursor())
@@ -68,7 +90,11 @@ def search_publications(prompt, top_k=10, abstract=False):
     return df
 
 def publications_summary():
-    '''Generate a summary of all publications in the database.'''
+    '''Generate a summary of all publications in the database.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the publication counts grouped by source.
+    '''
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("""
@@ -81,7 +107,11 @@ def publications_summary():
     return df
 
 def publication_date_distribution():
-    '''Get the distribution of publication dates (max and min dates included).'''
+    '''Get the distribution of publication dates (max and min dates included).
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the max and min publication dates.
+    '''
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("""
@@ -92,6 +122,7 @@ def publication_date_distribution():
     conn.close()
     df = pd.DataFrame([dict(result) for result in results])
 
+    # Ensure that the max and min publication dates do not exceed today's date.
     today = pd.Timestamp.now().date()
     if not df.empty:
         for column in ("max_date", "min_date"):
@@ -102,7 +133,14 @@ def publication_date_distribution():
     return df
 
 def top_topics(top_k=10):
-    '''Get the top topics (sources) with the most publications.'''
+    '''Get the top topics (sources) with the most publications.
+
+    Args:
+        top_k (int, optional): The number of top topics to return. Defaults to 10.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the top topics and their publication counts.
+    '''
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     cursor.execute("""
@@ -117,7 +155,11 @@ def top_topics(top_k=10):
     return df
 
 def get_example_kg_publication():
-    '''Return one random example: a medical condition, a paper studying it, and a method it uses.'''
+    '''Return one random example: a medical condition, a paper studying it, and a method it uses.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing one random example with columns for medical condition, paper title, and method.
+    '''
     conn = psycopg2.connect(connection_string)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
     # TABLESAMPLE reads only a random fraction of kg_edges (0.1% is ~23k of 23M rows) instead of
@@ -147,6 +189,12 @@ def search_documents_via_graph(user_queries: list[str]):
     Each query is matched on its own. Publications related to the most queries come first,
     then the ones with the closest concepts; publications related to only some queries still follow.
     Nodes include type and properties; edges include relation labels and properties.
+
+    Args:
+        user_queries (list[str]): A list of search queries to find related publications via the graph.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the matched nodes and edges for the queries, including publication details, concept details, and edge properties.
     """
     # 1. Embed each query on its own (already normalized by OpenAI)
     vectors = [get_embedding(query) for query in user_queries]
@@ -213,6 +261,7 @@ def search_documents_via_graph(user_queries: list[str]):
     node_ids = set()
     edge_keys = set()
 
+    # Process each row from the query results to build the nodes and edges for the graph visualization.
     for row in results:
         (paper_id, paper_title, paper_properties,
          concept_id, matched_concept, concept_type, concept_properties,
@@ -231,9 +280,16 @@ def search_documents_via_graph(user_queries: list[str]):
     return nodes, edges
 
 def get_one_hop(target_paper_id: str):
-    """Fetches a 1-hop subgraph for a specific paper."""
+    """Fetches a 1-hop subgraph for a specific paper.
+
+    Args:
+        target_paper_id (str): The ID of the target paper to fetch the 1-hop subgraph for.
+
+    Returns:
+        tuple[list[Node], list[Edge]]: A tuple containing the list of nodes and edges for the 1-hop subgraph.
+    """
     
-    # 1. SQL Query to get all edges and node details connected to the paper
+    # SQL Query to get all edges and node details connected to the paper
     query = """
         SELECT 
             e.source, sn.name AS source_name, sn.label AS source_label,
@@ -253,7 +309,7 @@ def get_one_hop(target_paper_id: str):
     finally:
         conn.close()
 
-    # 2. Process the results to create nodes and edges for visualization
+    # Process the results to create nodes and edges for visualization
     nodes = []
     edges = []
     node_ids = set()
@@ -281,9 +337,16 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
     Papers are ranked by exact shared concepts first (100% match), then by
     concepts that are semantically similar to the paper's concepts. Only papers
     with a real edge to the first hop are shown, so none is left disconnected.
+
+    Args:
+        target_paper_id (str): The ID of the target paper to fetch the 2-hop subgraph for.
+        similar_per_concept (int, optional): The number of similar concepts to consider per concept. Defaults to 3.
+
+    Returns:
+        tuple[list[Node], list[Edge]]: A tuple containing the list of nodes and edges for the 2-hop subgraph.
     """
 
-    # 1. First hop: reuse the one-hop lookup (paper + all directly connected nodes).
+    # First hop: reuse the one-hop lookup (paper + all directly connected nodes).
     nodes, edges = get_one_hop(target_paper_id)
     if not nodes:
         return nodes, edges
@@ -297,7 +360,7 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
     # Skip papers already shown, including copies with the same exact title.
     first_hop_titles = [n.label for n in nodes if n.type == "Publication"]
 
-    # 2. Rank other papers by the paper's concepts they match.
+    # Rank other papers by the paper's concepts they match.
     # A concept matches itself exactly, plus its few most similar concepts (embeddings,
     # HNSW index). The same concept can be stored under different labels or wording,
     # so similar concepts also link related papers. Exact matches always rank first.
@@ -356,7 +419,7 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
         LIMIT 5;
     """
 
-    # 3. Load only the edges linking the selected papers to nodes already in the graph.
+    # Load only the edges linking the selected papers to nodes already in the graph.
     edges_query = """
         SELECT
             e.source, sn.name AS source_name, sn.label AS source_label,
@@ -390,7 +453,7 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
     finally:
         conn.close()
 
-    # 4. Keep only the papers with a real edge to the first hop. A paper matched only through a
+    # Keep only the papers with a real edge to the first hop. A paper matched only through a
     # similar concept has no such edge, so it is left out instead of being shown disconnected.
     first_hop = set(first_hop_ids)
     linked_ids = set()
@@ -402,7 +465,7 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
     dropped_ids = set(related_ids) - linked_ids
     related = [row for row in related if row[0] in linked_ids]
 
-    # 5. Add the new papers and edges, skipping anything already in the graph.
+    # Add the new papers and edges, skipping anything already in the graph.
     node_ids = set(first_hop_ids)
     edge_keys = {(e.source, e.to, e.label) for e in edges}
 
@@ -410,6 +473,7 @@ def get_two_hops(target_paper_id: str, similar_per_concept: int = 3):
         nodes.append(Node(id=paper_id, label=paper_title, type="Publication", properties=paper_properties,widthConstraint={"maximum": 200}))
         node_ids.add(paper_id)
 
+    # Add edges for the new papers, ensuring no duplicates and skipping dropped papers.
     for row in results:
         (src_id, src_name, src_label, tgt_id, tgt_name, tgt_label,
          relation, src_properties, tgt_properties) = row
