@@ -12,6 +12,15 @@ a publication-centered knowledge graph for concept-based exploration.
 - University of Arizona, College of Information Science
 - Capstone Project — Fall 2026
 
+## AI-Assisted Development
+
+GitHub Copilot (autocomplete and conversational agents) assisted with code
+implementation and debugging, including code generation, syntax completion,
+architectural clarification, and troubleshooting. Copilot also helped draft
+code documentation and docstrings. The author reviewed, edited, and validated
+these contributions for technical accuracy and remains responsible for the
+project's final code and documentation.
+
 ## Requirements
 
 - Python 3.12
